@@ -1,18 +1,12 @@
-// Read-only helpers for the web viewer. Everything here shells out to the git
-// CLI against bare repositories under config.reposRoot. Output is parsed into
-// plain objects the HTML views can render.
+// Read-only helpers for the web viewer + repo management. Everything here shells
+// out to the git CLI against bare repositories under config.reposRoot.
+//
+// Repos are namespaced GitHub-style: <reposRoot>/<owner>/<name>.git, addressed
+// as `owner/name`. A RepoRef carries that identity through the whole module.
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import {
-  readdir,
-  readFile,
-  access,
-  writeFile,
-  unlink,
-  mkdir,
-  rm,
-} from "node:fs/promises";
+import { readdir, readFile, access, writeFile, unlink, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { config } from "./config.ts";
 
@@ -20,17 +14,14 @@ const exec = promisify(execFile);
 
 // Separators in git's OUTPUT that we split on.
 const NUL = "\x00";
-const REC = "\x1e"; // record separator between log entries
+const REC = "\x1e";
 
-// The SAME separators expressed as git pretty-format escapes. We put these in
-// the --format argument instead of literal control bytes, because Node's
-// child_process rejects arguments containing NUL bytes. git expands %x00/%x1e
-// into the real bytes in its output, which the NUL/REC splits above then use.
+// The same separators as git pretty-format escapes, used in the --format
+// argument (Node's child_process rejects literal NUL bytes in args; git expands
+// %x00/%x1e into the real bytes in its output).
 const FNUL = "%x00";
 const FREC = "%x1e";
 
-// Run git inside a repo directory, returning stdout. Large buffers are allowed
-// so blobs / diffs don't get truncated.
 async function git(repoDir: string, args: string[]): Promise<string> {
   const { stdout } = await exec("git", ["-C", repoDir, ...args], {
     maxBuffer: 64 * 1024 * 1024,
@@ -39,158 +30,159 @@ async function git(repoDir: string, args: string[]): Promise<string> {
   return stdout;
 }
 
-// A repo name must be a single path segment ending in `.git`, with no `..` or
-// slashes, so a request can never escape the repos root.
-export function safeRepoName(name: string): string | null {
-  const clean = name.endsWith(".git") ? name : `${name}.git`;
-  if (!/^[A-Za-z0-9._-]+\.git$/.test(clean)) return null;
-  if (clean.includes("..")) return null;
-  return clean;
+// ---- identity ---------------------------------------------------------------
+
+export interface RepoRef {
+  owner: string;
+  name: string; // without .git
 }
 
-export function repoDir(name: string): string | null {
-  const clean = safeRepoName(name);
-  if (!clean) return null;
-  return join(config.reposRoot, clean);
+const SEGMENT = /^[A-Za-z0-9._-]+$/;
+
+function safeSegment(s: string): boolean {
+  return SEGMENT.test(s) && !s.includes("..");
 }
 
-// Create an empty bare repo. Used to auto-provision on first authenticated
-// push so a backup target "just works".
-export async function initBareRepo(name: string): Promise<boolean> {
-  const dir = repoDir(name);
-  if (!dir) return false;
+// Validate an owner + repo name into a RepoRef. `name` may carry a `.git`
+// suffix (git clients send it); it's stripped. Returns null if either segment
+// is unsafe, so a request can never escape the repos root.
+export function safeRef(owner: string, nameRaw: string): RepoRef | null {
+  const name = nameRaw.replace(/\.git$/, "");
+  if (!safeSegment(owner) || !safeSegment(name)) return null;
+  return { owner, name };
+}
+
+export function refDir(ref: RepoRef): string {
+  return join(config.reposRoot, ref.owner, `${ref.name}.git`);
+}
+
+export function refSlug(ref: RepoRef): string {
+  return `${ref.owner}/${ref.name}`;
+}
+
+// Turn a username/display name into a safe owner segment.
+export function ownerSlug(raw: string): string {
+  const slug = raw.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug || "user";
+}
+
+export async function repoExists(ref: RepoRef): Promise<boolean> {
+  try {
+    await access(join(refDir(ref), "HEAD"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ---- create / delete --------------------------------------------------------
+
+export async function initBareRepo(ref: RepoRef): Promise<void> {
+  const dir = refDir(ref);
   await mkdir(dir, { recursive: true });
   await exec("git", ["init", "--bare", "--initial-branch=main", dir], {
     encoding: "utf8",
   });
-  return true;
-}
-
-// Permanently delete a bare repo. Guarded by safeRepoName (no traversal) and by
-// requiring it to be a real repo (has HEAD) before removing anything.
-export async function deleteRepo(name: string): Promise<boolean> {
-  const dir = repoDir(name);
-  if (!dir) return false;
-  if (!(await repoExists(name))) return false;
-  await rm(dir, { recursive: true, force: true });
-  return true;
-}
-
-const OWNER_FILE = "dough-git-owner";
-
-// Owner label for a repo (the username of whoever created it). Empty if unknown
-// (e.g. a repo auto-created by a push, where there's no browser identity).
-export async function repoOwner(name: string): Promise<string> {
-  const dir = repoDir(name);
-  if (!dir) return "";
-  try {
-    return (await readFile(join(dir, OWNER_FILE), "utf8")).trim();
-  } catch {
-    return "";
-  }
 }
 
 export interface CreateResult {
   ok: boolean;
+  ref?: RepoRef;
   error?: string;
 }
 
-// Explicitly create a repo from the web UI, stamping the owner.
 export async function createRepo(
-  name: string,
   owner: string,
+  nameRaw: string,
 ): Promise<CreateResult> {
-  const clean = safeRepoName(name);
-  if (!clean) {
+  const ref = safeRef(owner, nameRaw);
+  if (!ref) {
     return { ok: false, error: "invalid name — use letters, digits, . _ -" };
   }
-  const short = clean.replace(/\.git$/, "");
-  if (await repoExists(short)) {
+  if (await repoExists(ref)) {
     return { ok: false, error: "a repo with that name already exists" };
   }
-  await initBareRepo(short);
-  const dir = repoDir(short)!;
-  if (owner) {
-    await writeFile(join(dir, OWNER_FILE), `${owner}\n`);
-  }
-  return { ok: true };
+  await initBareRepo(ref);
+  return { ok: true, ref };
 }
 
-export async function repoExists(name: string): Promise<boolean> {
-  const dir = repoDir(name);
-  if (!dir) return false;
+// Permanently delete a bare repo (guarded: must be a real repo first).
+export async function deleteRepo(ref: RepoRef): Promise<boolean> {
+  if (!(await repoExists(ref))) return false;
+  await rm(refDir(ref), { recursive: true, force: true });
+  // Drop the owner directory too if it's now empty.
   try {
-    await access(join(dir, "HEAD"));
+    const ownerDir = join(config.reposRoot, ref.owner);
+    if ((await readdir(ownerDir)).length === 0) {
+      await rm(ownerDir, { recursive: true, force: true });
+    }
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
+// ---- visibility (filesystem marker) -----------------------------------------
+
+export async function isRepoPublic(ref: RepoRef): Promise<boolean> {
+  try {
+    await access(join(refDir(ref), config.publicMarker));
     return true;
   } catch {
     return false;
   }
 }
 
-// Visibility is a filesystem marker inside the bare repo. Absent = private,
-// so a freshly pushed repo is never accidentally public.
-export async function isRepoPublic(name: string): Promise<boolean> {
-  const dir = repoDir(name);
-  if (!dir) return false;
-  try {
-    await access(join(dir, config.publicMarker));
-    return true;
-  } catch {
-    return false;
-  }
+export async function setRepoPublic(ref: RepoRef, isPublic: boolean): Promise<void> {
+  const marker = join(refDir(ref), config.publicMarker);
+  if (isPublic) await writeFile(marker, "");
+  else await unlink(marker).catch(() => {});
 }
 
-export async function setRepoPublic(
-  name: string,
-  isPublic: boolean,
-): Promise<void> {
-  const dir = repoDir(name);
-  if (!dir) return;
-  const marker = join(dir, config.publicMarker);
-  if (isPublic) {
-    await writeFile(marker, "");
-  } else {
-    await unlink(marker).catch(() => {});
-  }
-}
+// ---- listing ----------------------------------------------------------------
 
 export interface RepoSummary {
-  name: string; // without .git
-  description: string;
-  head: string; // current branch
-  lastCommit: number | null; // unix seconds
-  isPublic: boolean;
   owner: string;
+  name: string;
+  description: string;
+  head: string;
+  lastCommit: number | null;
+  isPublic: boolean;
 }
 
-// Scan the repos root for bare repositories (`*.git` directories).
 export async function listRepos(): Promise<RepoSummary[]> {
-  let entries: string[];
+  let owners: string[];
   try {
-    entries = await readdir(config.reposRoot);
+    owners = await readdir(config.reposRoot);
   } catch {
     return [];
   }
 
   const repos: RepoSummary[] = [];
-  for (const entry of entries) {
-    if (!entry.endsWith(".git")) continue;
-    const dir = join(config.reposRoot, entry);
+  for (const owner of owners) {
+    if (!safeSegment(owner)) continue;
+    let entries: string[];
     try {
-      const description = await readDescription(dir);
-      const head = await headBranch(dir);
-      const lastCommit = await lastCommitTime(dir);
-      const name = entry.replace(/\.git$/, "");
-      repos.push({
-        name,
-        description,
-        head,
-        lastCommit,
-        isPublic: await isRepoPublic(name),
-        owner: await repoOwner(name),
-      });
+      entries = await readdir(join(config.reposRoot, owner));
     } catch {
-      // Not a valid repo dir; skip.
+      continue; // not a directory (e.g. the sqlite db file)
+    }
+    for (const entry of entries) {
+      if (!entry.endsWith(".git")) continue;
+      const ref: RepoRef = { owner, name: entry.replace(/\.git$/, "") };
+      const dir = refDir(ref);
+      try {
+        repos.push({
+          owner,
+          name: ref.name,
+          description: await readDescription(dir),
+          head: await headBranch(dir),
+          lastCommit: await lastCommitTime(dir),
+          isPublic: await isRepoPublic(ref),
+        });
+      } catch {
+        /* skip invalid */
+      }
     }
   }
 
@@ -225,6 +217,8 @@ async function lastCommitTime(dir: string): Promise<number | null> {
   }
 }
 
+// ---- viewer reads -----------------------------------------------------------
+
 export interface Commit {
   hash: string;
   author: string;
@@ -233,13 +227,8 @@ export interface Commit {
   subject: string;
 }
 
-export async function log(
-  name: string,
-  ref: string,
-  limit = 50,
-): Promise<Commit[]> {
-  const dir = repoDir(name);
-  if (!dir) return [];
+export async function log(ref: RepoRef, refspec: string, limit = 50): Promise<Commit[]> {
+  const dir = refDir(ref);
   const format = ["%H", "%an", "%ae", "%at", "%s"].join(FNUL);
   let out: string;
   try {
@@ -247,12 +236,11 @@ export async function log(
       "log",
       `--max-count=${limit}`,
       `--format=${format}${FREC}`,
-      ref,
+      refspec,
       "--",
     ]);
   } catch {
-    // Empty repo (no HEAD) or bad ref — nothing to show.
-    return [];
+    return []; // empty repo or bad ref
   }
   return out
     .split(REC)
@@ -274,18 +262,13 @@ export interface TreeEntry {
   mode: string;
   type: "blob" | "tree" | "commit";
   hash: string;
-  size: string; // "-" for trees
+  size: string;
   name: string;
 }
 
-export async function tree(
-  name: string,
-  ref: string,
-  path: string,
-): Promise<TreeEntry[]> {
-  const dir = repoDir(name);
-  if (!dir) return [];
-  const spec = path ? `${ref}:${path}` : ref;
+export async function tree(ref: RepoRef, refspec: string, path: string): Promise<TreeEntry[]> {
+  const dir = refDir(ref);
+  const spec = path ? `${refspec}:${path}` : refspec;
   let out: string;
   try {
     out = await git(dir, ["ls-tree", "--long", spec]);
@@ -296,10 +279,8 @@ export async function tree(
     .split("\n")
     .filter((line) => line.trim().length > 0)
     .map((line) => {
-      // <mode> SP <type> SP <hash> SP* <size> TAB <name>
       const [meta, entryName] = line.split("\t");
-      const parts = (meta ?? "").split(/\s+/);
-      const [mode, type, hash, size] = parts;
+      const [mode, type, hash, size] = (meta ?? "").split(/\s+/);
       return {
         mode: mode ?? "",
         type: (type ?? "blob") as TreeEntry["type"],
@@ -309,7 +290,6 @@ export async function tree(
       };
     })
     .sort((a, b) => {
-      // Directories first, then alphabetical.
       if (a.type !== b.type) return a.type === "tree" ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
@@ -320,28 +300,19 @@ export interface Blob {
   binary: boolean;
 }
 
-export async function blob(
-  name: string,
-  ref: string,
-  path: string,
-): Promise<Blob | null> {
-  const dir = repoDir(name);
-  if (!dir) return null;
+export async function blob(ref: RepoRef, refspec: string, path: string): Promise<Blob | null> {
+  const dir = refDir(ref);
   let stdout: Buffer;
   try {
-    ({ stdout } = (await exec("git", ["-C", dir, "show", `${ref}:${path}`], {
+    ({ stdout } = (await exec("git", ["-C", dir, "show", `${refspec}:${path}`], {
       maxBuffer: 64 * 1024 * 1024,
       encoding: "buffer",
     })) as unknown as { stdout: Buffer });
   } catch {
     return null;
   }
-  const buf = stdout as unknown as Buffer;
-  const binary = buf.subarray(0, 8000).includes(0);
-  return {
-    text: binary ? "" : buf.toString("utf8"),
-    binary,
-  };
+  const binary = stdout.subarray(0, 8000).includes(0);
+  return { text: binary ? "" : stdout.toString("utf8"), binary };
 }
 
 export interface CommitDetail extends Commit {
@@ -349,12 +320,8 @@ export interface CommitDetail extends Commit {
   diff: string;
 }
 
-export async function commit(
-  name: string,
-  sha: string,
-): Promise<CommitDetail | null> {
-  const dir = repoDir(name);
-  if (!dir) return null;
+export async function commit(ref: RepoRef, sha: string): Promise<CommitDetail | null> {
+  const dir = refDir(ref);
   const format = ["%H", "%an", "%ae", "%at", "%s", "%b"].join(FNUL);
   let out: string;
   try {
@@ -364,9 +331,7 @@ export async function commit(
   }
   const sep = out.indexOf(REC);
   if (sep === -1) return null;
-  const meta = out.slice(0, sep).split(NUL);
-  const diff = out.slice(sep + 1).replace(/^\n/, "");
-  const [hash, author, email, time, subject, body] = meta;
+  const [hash, author, email, time, subject, body] = out.slice(0, sep).split(NUL);
   return {
     hash: hash ?? "",
     author: author ?? "",
@@ -374,21 +339,6 @@ export async function commit(
     time: Number(time ?? 0),
     subject: subject ?? "",
     body: body ?? "",
-    diff,
+    diff: out.slice(sep + 1).replace(/^\n/, ""),
   };
-}
-
-export async function branches(name: string): Promise<string[]> {
-  const dir = repoDir(name);
-  if (!dir) return [];
-  try {
-    const out = await git(dir, [
-      "for-each-ref",
-      "--format=%(refname:short)",
-      "refs/heads",
-    ]);
-    return out.split("\n").filter((b) => b.trim().length > 0);
-  } catch {
-    return [];
-  }
 }

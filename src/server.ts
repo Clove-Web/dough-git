@@ -22,13 +22,13 @@ import {
 } from "./auth.ts";
 import { listTokens, createToken, revokeToken } from "./tokens.ts";
 import {
-  safeRepoName,
-  repoDir,
+  safeRef,
+  refDir,
+  refSlug,
   repoExists,
   initBareRepo,
   createRepo,
   deleteRepo,
-  repoOwner,
   isRepoPublic,
   setRepoPublic,
   listRepos,
@@ -36,6 +36,7 @@ import {
   tree,
   blob,
   commit,
+  type RepoRef,
 } from "./git.ts";
 import {
   advertiseResponse,
@@ -198,15 +199,15 @@ app.post("/tokens/:id/revoke", async (c) => {
 });
 
 // ---- repo creation (login required) -----------------------------------------
+// Repos are always created under the logged-in user's own username.
 
 app.post("/new", async (c) => {
   const user = c.get("user");
   if (!user) return c.text("forbidden\n", 403);
   const form = await c.req.formData();
-  const raw = String(form.get("name") ?? "");
-  const owner = user.username ?? user.name ?? user.email ?? "";
-  const result = await createRepo(raw, owner);
-  if (!result.ok) {
+  const owner = view.ownerOf(user);
+  const result = await createRepo(owner, String(form.get("name") ?? ""));
+  if (!result.ok || !result.ref) {
     return c.html(
       view.messagePage({
         title: "could not create repo",
@@ -216,8 +217,7 @@ app.post("/new", async (c) => {
       400,
     );
   }
-  const clean = safeRepoName(raw)!.replace(/\.git$/, "");
-  return c.redirect(`/${clean}/`);
+  return c.redirect(`/${result.ref.owner}/${result.ref.name}/`);
 });
 
 // ---- git smart HTTP ---------------------------------------------------------
@@ -232,16 +232,16 @@ function authChallenge(): Response {
 }
 
 // Returns null when access is allowed, otherwise a short-circuit Response.
-// Note: auth is checked BEFORE existence so a valid push token can auto-create
-// a missing repo (and so a missing private repo doesn't 404 before we prompt).
+// Auth is checked BEFORE existence so a valid push token can auto-create a
+// missing repo (and a missing private repo prompts rather than 404s).
 async function gitGate(
   c: { req: { header: (n: string) => string | undefined } },
-  name: string,
+  ref: RepoRef,
   needPush: boolean,
 ): Promise<Response | null> {
   const basic = parseBasicAuth(c.req.header("authorization"));
   const hasToken = Boolean(basic && isValidGitToken(basic[1]));
-  const exists = await repoExists(name);
+  const exists = await repoExists(ref);
 
   if (needPush) {
     if (!hasToken) return authChallenge();
@@ -249,68 +249,53 @@ async function gitGate(
       if (!config.autoCreate) {
         return new Response("repository not found\n", { status: 404 });
       }
-      await initBareRepo(name);
-      console.log(`[git] auto-created ${name}.git on first authenticated push`);
+      await initBareRepo(ref);
+      console.log(`[git] auto-created ${refSlug(ref)}.git on first push`);
     }
     return null;
   }
 
-  // read (clone / pull)
   if (!exists) return new Response("repository not found\n", { status: 404 });
-  if (await isRepoPublic(name)) return null;
+  if (await isRepoPublic(ref)) return null;
   if (hasToken) return null;
   return authChallenge();
 }
 
-app.get("/:repo/info/refs", async (c) => {
-  const repo = c.req.param("repo");
-  const clean = safeRepoName(repo);
+app.get("/:owner/:repo/info/refs", async (c) => {
+  const ref = safeRef(c.req.param("owner"), c.req.param("repo"));
   const service = c.req.query("service") as GitService | undefined;
-  if (!clean || !service || !GIT_SERVICES.includes(service)) {
+  if (!ref || !service || !GIT_SERVICES.includes(service)) {
     return c.text("only smart HTTP is supported\n", 400);
   }
-  const name = clean.replace(/\.git$/, "");
-  const gate = await gitGate(c, name, service === "git-receive-pack");
+  const gate = await gitGate(c, ref, service === "git-receive-pack");
   if (gate) return gate;
-  return advertiseResponse(repoDir(name)!, service);
+  return advertiseResponse(refDir(ref), service);
 });
 
 async function rpcHandler(c: any, service: GitService): Promise<Response> {
-  const clean = safeRepoName(c.req.param("repo"));
-  if (!clean) return c.text("bad repo\n", 400);
-  const name = clean.replace(/\.git$/, "");
-  const gate = await gitGate(c, name, service === "git-receive-pack");
+  const ref = safeRef(c.req.param("owner"), c.req.param("repo"));
+  if (!ref) return c.text("bad repo\n", 400);
+  const gate = await gitGate(c, ref, service === "git-receive-pack");
   if (gate) return gate;
   return serviceRpc({
-    repoDir: repoDir(name)!,
+    repoDir: refDir(ref),
     service,
     body: c.req.raw.body,
     gzip: c.req.header("content-encoding") === "gzip",
   });
 }
 
-app.post("/:repo/git-upload-pack", (c) => rpcHandler(c, "git-upload-pack"));
-app.post("/:repo/git-receive-pack", (c) => rpcHandler(c, "git-receive-pack"));
+app.post("/:owner/:repo/git-upload-pack", (c) => rpcHandler(c, "git-upload-pack"));
+app.post("/:owner/:repo/git-receive-pack", (c) => rpcHandler(c, "git-receive-pack"));
 
 // ---- viewer -----------------------------------------------------------------
 
 app.get("/", async (c) => {
   const user = c.get("user");
   const all = await listRepos();
-  // Hide private repos from anonymous visitors.
   const visible = user ? all : all.filter((r) => r.isPublic);
   return c.html(view.repoListPage(visible, user));
 });
-
-// Guard a viewer request: null return means "render 404".
-async function canView(
-  name: string,
-  user: SessionUser | null,
-): Promise<boolean> {
-  if (!(await repoExists(name))) return false;
-  if (await isRepoPublic(name)) return true;
-  return Boolean(user);
-}
 
 function notFound(c: any) {
   return c.html(
@@ -323,83 +308,77 @@ function notFound(c: any) {
   );
 }
 
-app.get("/:name/log", async (c) => {
-  const user = c.get("user");
-  const name = c.req.param("name");
-  if (!(await canView(name, user))) return notFound(c);
-  const commits = await log(name, "HEAD", 100);
-  return c.html(view.logPage({ name, commits, user }));
-});
-
-app.get("/:name/tree", async (c) => renderTree(c, ""));
-app.get("/:name/tree/:path{.*}", async (c) => renderTree(c, c.req.param("path")));
-
-async function renderTree(c: any, path: string) {
-  const user = c.get("user");
-  const name = c.req.param("name");
-  if (!(await canView(name, user))) return notFound(c);
-  const entries = await tree(name, "HEAD", path);
-  return c.html(view.treePage({ name, path, entries, user }));
+// Resolve owner/name params to a viewable RepoRef, or null (render 404).
+async function viewable(c: any): Promise<RepoRef | null> {
+  const ref = safeRef(c.req.param("owner"), c.req.param("name"));
+  if (!ref || !(await repoExists(ref))) return null;
+  if (await isRepoPublic(ref)) return ref;
+  return c.get("user") ? ref : null;
 }
 
-app.get("/:name/blob/:path{.*}", async (c) => {
-  const user = c.get("user");
-  const name = c.req.param("name");
+app.get("/:owner/:name/log", async (c) => {
+  const ref = await viewable(c);
+  if (!ref) return notFound(c);
+  const commits = await log(ref, "HEAD", 100);
+  return c.html(view.logPage({ ...ref, commits, user: c.get("user") }));
+});
+
+app.get("/:owner/:name/tree", (c) => renderTree(c, ""));
+app.get("/:owner/:name/tree/:path{.*}", (c) => renderTree(c, c.req.param("path")));
+
+async function renderTree(c: any, path: string) {
+  const ref = await viewable(c);
+  if (!ref) return notFound(c);
+  const entries = await tree(ref, "HEAD", path);
+  return c.html(view.treePage({ ...ref, path, entries, user: c.get("user") }));
+}
+
+app.get("/:owner/:name/blob/:path{.*}", async (c) => {
+  const ref = await viewable(c);
+  if (!ref) return notFound(c);
   const path = c.req.param("path");
-  if (!(await canView(name, user))) return notFound(c);
-  const b = await blob(name, "HEAD", path);
+  const b = await blob(ref, "HEAD", path);
   if (!b) return notFound(c);
   return c.html(
-    view.blobPage({ name, path, binary: b.binary, text: b.text, user }),
+    view.blobPage({ ...ref, path, binary: b.binary, text: b.text, user: c.get("user") }),
   );
 });
 
-app.get("/:name/commit/:sha", async (c) => {
-  const user = c.get("user");
-  const name = c.req.param("name");
-  if (!(await canView(name, user))) return notFound(c);
-  const detail = await commit(name, c.req.param("sha"));
+app.get("/:owner/:name/commit/:sha", async (c) => {
+  const ref = await viewable(c);
+  if (!ref) return notFound(c);
+  const detail = await commit(ref, c.req.param("sha"));
   if (!detail) return notFound(c);
-  return c.html(view.commitPage({ name, commit: detail, user }));
+  return c.html(view.commitPage({ ...ref, commit: detail, user: c.get("user") }));
 });
 
-// Toggle visibility (owner action; requires a logged-in, allowed user).
-app.post("/:name/visibility", async (c) => {
+app.post("/:owner/:name/visibility", async (c) => {
   const user = c.get("user");
   if (!user) return c.text("forbidden\n", 403);
-  const name = c.req.param("name");
-  if (!(await repoExists(name))) return notFound(c);
+  const ref = safeRef(c.req.param("owner"), c.req.param("name"));
+  if (!ref || !(await repoExists(ref))) return notFound(c);
   const form = await c.req.formData();
-  await setRepoPublic(name, form.get("public") === "on");
-  return c.redirect(`/${name}/`);
+  await setRepoPublic(ref, form.get("public") === "on");
+  return c.redirect(`/${ref.owner}/${ref.name}/`);
 });
 
-app.post("/:name/delete", async (c) => {
+app.post("/:owner/:name/delete", async (c) => {
   const user = c.get("user");
   if (!user) return c.text("forbidden\n", 403);
-  await deleteRepo(c.req.param("name"));
+  const ref = safeRef(c.req.param("owner"), c.req.param("name"));
+  if (ref) await deleteRepo(ref);
   return c.redirect("/");
 });
 
-app.get("/:name", async (c) => {
-  const user = c.get("user");
-  const name = c.req.param("name");
-  if (!(await canView(name, user))) return notFound(c);
-  const [commits, isPublic, owner] = await Promise.all([
-    log(name, "HEAD", 20),
-    isRepoPublic(name),
-    repoOwner(name),
+app.get("/:owner/:name", async (c) => {
+  const ref = await viewable(c);
+  if (!ref) return notFound(c);
+  const [commits, isPublic] = await Promise.all([
+    log(ref, "HEAD", 20),
+    isRepoPublic(ref),
   ]);
   return c.html(
-    view.summaryPage({
-      name,
-      description: "",
-      isPublic,
-      owner,
-      branch: "HEAD",
-      commits,
-      user,
-    }),
+    view.summaryPage({ ...ref, isPublic, commits, user: c.get("user") }),
   );
 });
 
