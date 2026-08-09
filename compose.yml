@@ -1,8 +1,8 @@
 services:
   minigit:
     build: .
-    image: minigit:latest
-    container_name: minigit
+    image: dough-git:latest
+    container_name: dough-git
     restart: unless-stopped
 
     # Secrets + PocketID config live in .env (see .env.example).
