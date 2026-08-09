@@ -35,11 +35,11 @@ COPY --from=build /app/public ./public
 
 # Sensible in-container defaults; secrets come from the environment / .env.
 ENV MINIGIT_HOST=0.0.0.0 \
-    MINIGIT_PORT=3000 \
+    MINIGIT_PORT=4010 \
     MINIGIT_REPOS_ROOT=/srv/git \
     MINIGIT_STATIC_DIR=/app/public
 
-EXPOSE 3000
+EXPOSE 4010
 VOLUME ["/srv/git"]
 
 CMD ["node", "dist/server.js"]

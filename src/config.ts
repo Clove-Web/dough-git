@@ -15,9 +15,9 @@ function list(name: string): string[] {
 
 export const config = {
   reposRoot: optional("MINIGIT_REPOS_ROOT", "/srv/git"),
-  baseUrl: optional("MINIGIT_BASE_URL", "http://localhost:3000"),
+  baseUrl: optional("MINIGIT_BASE_URL", "http://localhost:4010"),
   host: optional("MINIGIT_HOST", "127.0.0.1"),
-  port: Number(optional("MINIGIT_PORT", "3000")),
+  port: Number(optional("MINIGIT_PORT", "4010")),
   title: optional("MINIGIT_TITLE", "minigit"),
 
   // Directory whose files are served at /static (drop your own style.css here).

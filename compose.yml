@@ -13,13 +13,13 @@ services:
     # volume regardless of what .env says.
     environment:
       MINIGIT_HOST: "0.0.0.0"
-      MINIGIT_PORT: "3000"
+      MINIGIT_PORT: "4010"
       MINIGIT_REPOS_ROOT: /srv/git
       MINIGIT_STATIC_DIR: /app/public
 
-    # Bind to localhost only — put your TLS-terminating reverse proxy in front.
+    # Bind to localhost only — nginx (backup.doughmination.gay) proxies to this.
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:4010:4010"
 
     # Your bare repositories. Back this directory up and that's your whole
     # git mirror. Point the left side wherever you keep them on the host.
