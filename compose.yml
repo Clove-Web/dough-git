@@ -1,0 +1,27 @@
+services:
+  minigit:
+    build: .
+    image: minigit:latest
+    container_name: minigit
+    restart: unless-stopped
+
+    # Secrets + PocketID config live in .env (see .env.example).
+    env_file:
+      - .env
+
+    # In-container overrides so it binds all interfaces and finds the repos
+    # volume regardless of what .env says.
+    environment:
+      MINIGIT_HOST: "0.0.0.0"
+      MINIGIT_PORT: "3000"
+      MINIGIT_REPOS_ROOT: /srv/git
+      MINIGIT_STATIC_DIR: /app/public
+
+    # Bind to localhost only — put your TLS-terminating reverse proxy in front.
+    ports:
+      - "127.0.0.1:3000:3000"
+
+    # Your bare repositories. Back this directory up and that's your whole
+    # git mirror. Point the left side wherever you keep them on the host.
+    volumes:
+      - ./data/repos:/srv/git
