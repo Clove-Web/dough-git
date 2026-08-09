@@ -17,8 +17,16 @@ import { config } from "./config.ts";
 
 const exec = promisify(execFile);
 
+// Separators in git's OUTPUT that we split on.
 const NUL = "\x00";
 const REC = "\x1e"; // record separator between log entries
+
+// The SAME separators expressed as git pretty-format escapes. We put these in
+// the --format argument instead of literal control bytes, because Node's
+// child_process rejects arguments containing NUL bytes. git expands %x00/%x1e
+// into the real bytes in its output, which the NUL/REC splits above then use.
+const FNUL = "%x00";
+const FREC = "%x1e";
 
 // Run git inside a repo directory, returning stdout. Large buffers are allowed
 // so blobs / diffs don't get truncated.
@@ -221,11 +229,11 @@ export async function log(
 ): Promise<Commit[]> {
   const dir = repoDir(name);
   if (!dir) return [];
-  const format = ["%H", "%an", "%ae", "%at", "%s"].join(NUL);
+  const format = ["%H", "%an", "%ae", "%at", "%s"].join(FNUL);
   const out = await git(dir, [
     "log",
     `--max-count=${limit}`,
-    `--format=${format}${REC}`,
+    `--format=${format}${FREC}`,
     ref,
     "--",
   ]);
@@ -320,10 +328,10 @@ export async function commit(
 ): Promise<CommitDetail | null> {
   const dir = repoDir(name);
   if (!dir) return null;
-  const format = ["%H", "%an", "%ae", "%at", "%s", "%b"].join(NUL);
+  const format = ["%H", "%an", "%ae", "%at", "%s", "%b"].join(FNUL);
   const out = await git(dir, [
     "show",
-    `--format=${format}${REC}`,
+    `--format=${format}${FREC}`,
     "--patch",
     sha,
   ]);
