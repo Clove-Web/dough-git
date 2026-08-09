@@ -18,7 +18,7 @@ export const config = {
   baseUrl: optional("MINIGIT_BASE_URL", "http://localhost:4010"),
   host: optional("MINIGIT_HOST", "127.0.0.1"),
   port: Number(optional("MINIGIT_PORT", "4010")),
-  title: optional("MINIGIT_TITLE", "minigit"),
+  title: optional("MINIGIT_TITLE", "dough-git"),
 
   // Directory whose files are served at /static (drop your own style.css here).
   staticDir: optional("MINIGIT_STATIC_DIR", "./public"),
@@ -35,6 +35,8 @@ export const config = {
     issuer: optional("OIDC_ISSUER", ""),
     clientId: optional("OIDC_CLIENT_ID", ""),
     clientSecret: optional("OIDC_CLIENT_SECRET", ""),
+    // "" (default) | "basic" | "post" | "none" — token-endpoint auth method.
+    tokenAuth: optional("OIDC_TOKEN_AUTH", ""),
   },
 
   // Signs session + OAuth transaction cookies. `openssl rand -hex 32`.

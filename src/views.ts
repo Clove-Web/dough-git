@@ -52,7 +52,7 @@ function layout(opts: {
 ${opts.body}
   </main>
   <footer class="${c.siteFooter}">
-    <span>minigit &middot; a minimal git mirror</span>
+    <span>dough-git &middot; a minimal git mirror</span>
   </footer>
 </body>
 </html>`;

@@ -1,5 +1,5 @@
 services:
-  minigit:
+  dough-git:
     build: .
     image: dough-git:latest
     container_name: dough-git

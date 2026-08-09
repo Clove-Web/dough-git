@@ -59,7 +59,7 @@ check(
 );
 
 // ---- set up a real bare repo ------------------------------------------------
-const work = mkdtempSync(join(tmpdir(), "minigit-"));
+const work = mkdtempSync(join(tmpdir(), "dough-git-"));
 const seed = join(work, "seed");
 const bare = join(work, "repo.git");
 

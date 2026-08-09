@@ -1,5 +1,5 @@
 {
-  "name": "minigit",
+  "name": "dough-git",
   "version": "0.1.0",
   "description": "A minimal self-hosted git mirror: HTTP clone/pull/push + cgit-style viewer, gated by PocketID (OIDC). Styled with Vanilla Extract.",
   "type": "module",

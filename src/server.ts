@@ -15,6 +15,7 @@ import {
   makeSessionCookie,
   startLogin,
   finishLogin,
+  oidcIssuer,
   parseBasicAuth,
   isValidGitToken,
   type SessionUser,
@@ -103,7 +104,31 @@ app.get("/auth/login", async (c) => {
 app.get("/auth/callback", async (c) => {
   const tx = getCookie(c, OAUTH_COOKIE);
   deleteCookie(c, OAUTH_COOKIE, { path: "/" });
-  const user = await finishLogin(c.req.url, tx).catch(() => null);
+
+  // If PocketID redirected back with an error, surface it directly.
+  const idpError = c.req.query("error");
+  if (idpError) {
+    console.error(
+      `[auth] provider returned error=${idpError} ${c.req.query("error_description") ?? ""}`,
+    );
+  }
+  if (!tx) {
+    console.error(
+      "[auth] no oauth transaction cookie on callback — likely a cookie issue " +
+        "(MINIGIT_BASE_URL scheme vs how you're actually reaching the site, or a " +
+        "host mismatch between /auth/login and /auth/callback).",
+    );
+  }
+
+  let user = null;
+  try {
+    user = await finishLogin(c.req.url, tx);
+  } catch (err) {
+    console.error(
+      "[auth] callback failed:",
+      err instanceof Error ? (err.stack ?? err.message) : err,
+    );
+  }
   if (!user) {
     return c.html(
       view.messagePage({
@@ -153,7 +178,7 @@ async function gitGate(
   }
   return new Response("authentication required\n", {
     status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="minigit"' },
+    headers: { "WWW-Authenticate": 'Basic realm="dough-git"' },
   });
 }
 
@@ -297,11 +322,24 @@ serve(
     port: config.port,
     hostname: config.host,
   },
-  () => {
-    console.log(`minigit listening on http://${config.host}:${config.port}`);
+  async () => {
+    console.log(`dough-git listening on http://${config.host}:${config.port}`);
     console.log(`  repos root: ${config.reposRoot}`);
     console.log(`  static dir: ${config.staticDir}`);
+    console.log(`  base url:   ${config.baseUrl}`);
     console.log(`  oidc:       ${oidcEnabled ? "enabled" : "disabled"}`);
     console.log(`  git tokens: ${config.gitTokens.length} configured`);
+    if (oidcEnabled) {
+      try {
+        const iss = await oidcIssuer();
+        console.log(`  oidc issuer (must equal the callback's iss): ${iss}`);
+        console.log(`  oidc redirect_uri: ${config.baseUrl}/auth/callback`);
+      } catch (err) {
+        console.error(
+          "  oidc discovery FAILED (check OIDC_ISSUER):",
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
   },
 );

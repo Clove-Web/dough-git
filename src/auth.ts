@@ -118,13 +118,43 @@ let discovered: oidc.Configuration | null = null;
 
 async function oidcConfig(): Promise<oidc.Configuration> {
   if (!discovered) {
+    const { issuer, clientId, clientSecret, tokenAuth } = config.oidc;
+
+    // Token-endpoint auth method. Empty = openid-client's default. Set
+    // OIDC_TOKEN_AUTH=post for PocketID clients configured as client_secret_post,
+    // or =none for a public (PKCE-only) client with no secret.
+    let clientAuth: oidc.ClientAuth | undefined;
+    switch (tokenAuth) {
+      case "post":
+        clientAuth = oidc.ClientSecretPost(clientSecret);
+        break;
+      case "basic":
+        clientAuth = oidc.ClientSecretBasic(clientSecret);
+        break;
+      case "none":
+        clientAuth = oidc.None();
+        break;
+      default:
+        clientAuth = undefined;
+    }
+
     discovered = await oidc.discovery(
-      new URL(config.oidc.issuer),
-      config.oidc.clientId,
-      config.oidc.clientSecret,
+      new URL(issuer),
+      clientId,
+      // When clientAuth is explicit it already carries the secret; otherwise
+      // pass the secret string so openid-client uses its default method.
+      clientAuth ? undefined : clientSecret,
+      clientAuth,
     );
   }
   return discovered;
+}
+
+// The issuer the discovery document actually advertises. Must match the `iss`
+// PocketID returns on the callback, or openid-client rejects the login.
+export async function oidcIssuer(): Promise<string> {
+  const cfg = await oidcConfig();
+  return cfg.serverMetadata().issuer;
 }
 
 export interface AuthStart {
@@ -170,14 +200,25 @@ export async function finishLogin(
   });
 
   const claims = tokens.claims();
-  if (!claims?.sub) return null;
+  if (!claims?.sub) {
+    console.error("[auth] token response had no sub claim");
+    return null;
+  }
 
   const user: SessionUser = {
     sub: String(claims.sub),
     email: typeof claims.email === "string" ? claims.email : null,
     name: typeof claims.name === "string" ? claims.name : null,
   };
-  return isAllowed(user) ? user : null;
+  if (!isAllowed(user)) {
+    console.error(
+      `[auth] login denied by ALLOWED_USERS. Authenticated as ` +
+        `sub=${user.sub} email=${user.email ?? "(none)"}. ` +
+        `Add one of those to ALLOWED_USERS (or leave it blank to allow any login).`,
+    );
+    return null;
+  }
+  return user;
 }
 
 export { oidcEnabled };
