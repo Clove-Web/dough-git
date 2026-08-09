@@ -120,13 +120,26 @@ app.get("/auth/callback", async (c) => {
     );
   }
 
+  // Behind the reverse proxy, c.req.url carries the internal host
+  // (127.0.0.1:4010). The OIDC token exchange must use the SAME redirect_uri we
+  // sent in the auth request, so rebuild the callback URL from the public base
+  // URL, preserving the query (code, state, iss).
+  const currentUrl = `${config.baseUrl}/auth/callback${new URL(c.req.url).search}`;
+
   let user = null;
   try {
-    user = await finishLogin(c.req.url, tx);
+    user = await finishLogin(currentUrl, tx);
   } catch (err) {
+    const e = err as {
+      error?: string;
+      error_description?: string;
+      message?: string;
+    };
     console.error(
       "[auth] callback failed:",
-      err instanceof Error ? (err.stack ?? err.message) : err,
+      e?.error ? `error=${e.error}` : "",
+      e?.error_description ? `desc=${e.error_description}` : "",
+      err instanceof Error ? e.message : err,
     );
   }
   if (!user) {
