@@ -4,7 +4,14 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readdir, readFile, access, writeFile, unlink } from "node:fs/promises";
+import {
+  readdir,
+  readFile,
+  access,
+  writeFile,
+  unlink,
+  mkdir,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { config } from "./config.ts";
 
@@ -36,6 +43,58 @@ export function repoDir(name: string): string | null {
   const clean = safeRepoName(name);
   if (!clean) return null;
   return join(config.reposRoot, clean);
+}
+
+// Create an empty bare repo. Used to auto-provision on first authenticated
+// push so a backup target "just works".
+export async function initBareRepo(name: string): Promise<boolean> {
+  const dir = repoDir(name);
+  if (!dir) return false;
+  await mkdir(dir, { recursive: true });
+  await exec("git", ["init", "--bare", "--initial-branch=main", dir], {
+    encoding: "utf8",
+  });
+  return true;
+}
+
+const OWNER_FILE = "dough-git-owner";
+
+// Owner label for a repo (the username of whoever created it). Empty if unknown
+// (e.g. a repo auto-created by a push, where there's no browser identity).
+export async function repoOwner(name: string): Promise<string> {
+  const dir = repoDir(name);
+  if (!dir) return "";
+  try {
+    return (await readFile(join(dir, OWNER_FILE), "utf8")).trim();
+  } catch {
+    return "";
+  }
+}
+
+export interface CreateResult {
+  ok: boolean;
+  error?: string;
+}
+
+// Explicitly create a repo from the web UI, stamping the owner.
+export async function createRepo(
+  name: string,
+  owner: string,
+): Promise<CreateResult> {
+  const clean = safeRepoName(name);
+  if (!clean) {
+    return { ok: false, error: "invalid name — use letters, digits, . _ -" };
+  }
+  const short = clean.replace(/\.git$/, "");
+  if (await repoExists(short)) {
+    return { ok: false, error: "a repo with that name already exists" };
+  }
+  await initBareRepo(short);
+  const dir = repoDir(short)!;
+  if (owner) {
+    await writeFile(join(dir, OWNER_FILE), `${owner}\n`);
+  }
+  return { ok: true };
 }
 
 export async function repoExists(name: string): Promise<boolean> {
@@ -82,6 +141,7 @@ export interface RepoSummary {
   head: string; // current branch
   lastCommit: number | null; // unix seconds
   isPublic: boolean;
+  owner: string;
 }
 
 // Scan the repos root for bare repositories (`*.git` directories).
@@ -108,6 +168,7 @@ export async function listRepos(): Promise<RepoSummary[]> {
         head,
         lastCommit,
         isPublic: await isRepoPublic(name),
+        owner: await repoOwner(name),
       });
     } catch {
       // Not a valid repo dir; skip.

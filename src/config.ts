@@ -13,8 +13,10 @@ function list(name: string): string[] {
     .filter(Boolean);
 }
 
+const reposRoot = optional("MINIGIT_REPOS_ROOT", "/srv/git");
+
 export const config = {
-  reposRoot: optional("MINIGIT_REPOS_ROOT", "/srv/git"),
+  reposRoot,
   baseUrl: optional("MINIGIT_BASE_URL", "http://localhost:4010"),
   host: optional("MINIGIT_HOST", "127.0.0.1"),
   port: Number(optional("MINIGIT_PORT", "4010")),
@@ -26,10 +28,17 @@ export const config = {
   // Marker filename that makes a bare repo public. Absent = private.
   publicMarker: optional("MINIGIT_PUBLIC_MARKER", "minigit-public"),
 
-  // Tokens accepted as the HTTP Basic password for git clone/pull/push.
-  // Any username works; only the token is checked. Generate with:
-  //   openssl rand -hex 24
+  // Static tokens accepted as the HTTP Basic password (in addition to any
+  // tokens minted via the SQLite-backed token UI). Any username works.
   gitTokens: list("MINIGIT_GIT_TOKENS"),
+
+  // SQLite file backing the token UI. Defaults inside the repos volume so it
+  // persists. Note: a non-.git file here is ignored by the repo listing.
+  dbPath: optional("MINIGIT_DB_PATH", "") || `${reposRoot}/dough-git.db`,
+
+  // Auto-create a bare repo on first authenticated push (great for a backup
+  // target — just `git push` and the repo appears). Set to "false" to disable.
+  autoCreate: optional("MINIGIT_AUTO_CREATE", "true") !== "false",
 
   oidc: {
     issuer: optional("OIDC_ISSUER", ""),

@@ -42,4 +42,5 @@ ENV MINIGIT_HOST=0.0.0.0 \
 EXPOSE 4010
 VOLUME ["/srv/git"]
 
-CMD ["node", "dist/server.js"]
+# --experimental-sqlite enables the built-in node:sqlite used by the token store.
+CMD ["node", "--experimental-sqlite", "--disable-warning=ExperimentalWarning", "dist/server.js"]

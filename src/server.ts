@@ -20,10 +20,14 @@ import {
   isValidGitToken,
   type SessionUser,
 } from "./auth.ts";
+import { listTokens, createToken, revokeToken } from "./tokens.ts";
 import {
   safeRepoName,
   repoDir,
   repoExists,
+  initBareRepo,
+  createRepo,
+  repoOwner,
   isRepoPublic,
   setRepoPublic,
   listRepos,
@@ -167,32 +171,94 @@ app.get("/auth/logout", (c) => {
   return c.redirect("/");
 });
 
+// ---- token management (login required) --------------------------------------
+
+app.get("/tokens", (c) => {
+  const user = c.get("user");
+  if (!user) return c.redirect("/auth/login");
+  return c.html(view.tokensPage({ tokens: listTokens(), user }));
+});
+
+app.post("/tokens", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.text("forbidden\n", 403);
+  const form = await c.req.formData();
+  const plaintext = createToken(String(form.get("label") ?? ""), user.sub);
+  return c.html(
+    view.tokensPage({ tokens: listTokens(), user, newToken: plaintext }),
+  );
+});
+
+app.post("/tokens/:id/revoke", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.text("forbidden\n", 403);
+  revokeToken(c.req.param("id"));
+  return c.redirect("/tokens");
+});
+
+// ---- repo creation (login required) -----------------------------------------
+
+app.post("/new", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.text("forbidden\n", 403);
+  const form = await c.req.formData();
+  const raw = String(form.get("name") ?? "");
+  const owner = user.username ?? user.name ?? user.email ?? "";
+  const result = await createRepo(raw, owner);
+  if (!result.ok) {
+    return c.html(
+      view.messagePage({
+        title: "could not create repo",
+        message: result.error ?? "unknown error",
+        user,
+      }),
+      400,
+    );
+  }
+  const clean = safeRepoName(raw)!.replace(/\.git$/, "");
+  return c.redirect(`/${clean}/`);
+});
+
 // ---- git smart HTTP ---------------------------------------------------------
 
 const GIT_SERVICES: GitService[] = ["git-upload-pack", "git-receive-pack"];
 
+function authChallenge(): Response {
+  return new Response("authentication required\n", {
+    status: 401,
+    headers: { "WWW-Authenticate": 'Basic realm="dough-git"' },
+  });
+}
+
 // Returns null when access is allowed, otherwise a short-circuit Response.
+// Note: auth is checked BEFORE existence so a valid push token can auto-create
+// a missing repo (and so a missing private repo doesn't 404 before we prompt).
 async function gitGate(
   c: { req: { header: (n: string) => string | undefined } },
   name: string,
   needPush: boolean,
 ): Promise<Response | null> {
-  if (!(await repoExists(name))) {
-    return new Response("repository not found\n", { status: 404 });
-  }
   const basic = parseBasicAuth(c.req.header("authorization"));
   const hasToken = Boolean(basic && isValidGitToken(basic[1]));
+  const exists = await repoExists(name);
 
   if (needPush) {
-    if (hasToken) return null;
-  } else {
-    if (await isRepoPublic(name)) return null;
-    if (hasToken) return null;
+    if (!hasToken) return authChallenge();
+    if (!exists) {
+      if (!config.autoCreate) {
+        return new Response("repository not found\n", { status: 404 });
+      }
+      await initBareRepo(name);
+      console.log(`[git] auto-created ${name}.git on first authenticated push`);
+    }
+    return null;
   }
-  return new Response("authentication required\n", {
-    status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="dough-git"' },
-  });
+
+  // read (clone / pull)
+  if (!exists) return new Response("repository not found\n", { status: 404 });
+  if (await isRepoPublic(name)) return null;
+  if (hasToken) return null;
+  return authChallenge();
 }
 
 app.get("/:repo/info/refs", async (c) => {
@@ -311,15 +377,17 @@ app.get("/:name", async (c) => {
   const user = c.get("user");
   const name = c.req.param("name");
   if (!(await canView(name, user))) return notFound(c);
-  const [commits, isPublic] = await Promise.all([
+  const [commits, isPublic, owner] = await Promise.all([
     log(name, "HEAD", 20),
     isRepoPublic(name),
+    repoOwner(name),
   ]);
   return c.html(
     view.summaryPage({
       name,
       description: "",
       isPublic,
+      owner,
       branch: "HEAD",
       commits,
       user,

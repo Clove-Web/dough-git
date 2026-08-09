@@ -16,6 +16,8 @@ services:
       MINIGIT_PORT: "4010"
       MINIGIT_REPOS_ROOT: /srv/git
       MINIGIT_STATIC_DIR: /app/public
+      # Token DB lives on the repos volume so it persists across restarts.
+      MINIGIT_DB_PATH: /srv/git/dough-git.db
 
     # Bind to localhost only — nginx (backup.doughmination.gay) proxies to this.
     ports:

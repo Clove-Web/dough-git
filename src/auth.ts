@@ -11,6 +11,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import * as oidc from "openid-client";
 import { config, oidcEnabled } from "./config.ts";
+import { verifyDbToken } from "./tokens.ts";
 
 // ---- signed values ----------------------------------------------------------
 
@@ -61,6 +62,7 @@ export interface SessionUser {
   sub: string;
   email: string | null;
   name: string | null;
+  username: string | null; // PocketID preferred_username
 }
 
 const SESSION_TTL = 60 * 60 * 24 * 30; // 30 days
@@ -99,17 +101,20 @@ export function parseBasicAuth(
   return [decoded.slice(0, idx), decoded.slice(idx + 1)];
 }
 
-// Constant-time check of a presented token against the configured set.
+// Check a presented token against the static env set (constant-time) and then
+// the SQLite-backed tokens.
 export function isValidGitToken(token: string): boolean {
   const candidate = Buffer.from(token);
-  let ok = false;
   for (const known of config.gitTokens) {
     const target = Buffer.from(known);
-    if (candidate.length === target.length && timingSafeEqual(candidate, target)) {
-      ok = true;
+    if (
+      candidate.length === target.length &&
+      timingSafeEqual(candidate, target)
+    ) {
+      return true;
     }
   }
-  return ok;
+  return verifyDbToken(token);
 }
 
 // ---- OIDC (PocketID) --------------------------------------------------------
@@ -209,6 +214,10 @@ export async function finishLogin(
     sub: String(claims.sub),
     email: typeof claims.email === "string" ? claims.email : null,
     name: typeof claims.name === "string" ? claims.name : null,
+    username:
+      typeof claims.preferred_username === "string"
+        ? claims.preferred_username
+        : null,
   };
   if (!isAllowed(user)) {
     console.error(

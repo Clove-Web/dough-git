@@ -5,6 +5,7 @@
 import { config } from "./config.ts";
 import { classes as c } from "./styles/index.ts";
 import type { SessionUser } from "./auth.ts";
+import type { TokenRow } from "./tokens.ts";
 import type {
   RepoSummary,
   Commit,
@@ -31,7 +32,8 @@ function layout(opts: {
   body: string;
 }): string {
   const authLink = opts.user
-    ? `<span class="${c.user}">${esc(opts.user.name ?? opts.user.email ?? opts.user.sub)}</span>
+    ? `<a class="${c.navLink}" href="/tokens">tokens</a>
+       <span class="${c.user}">${esc(opts.user.name ?? opts.user.email ?? opts.user.sub)}</span>
        <a class="${c.navLink}" href="/auth/logout">logout</a>`
     : `<a class="${c.navLink}" href="/auth/login">login</a>`;
 
@@ -67,19 +69,29 @@ export function repoListPage(
       (r) => `      <tr class="${c.repoRow}">
         <td class="${c.repoName}"><a href="/${esc(r.name)}/">${esc(r.name)}</a></td>
         <td class="${c.repoDesc}">${esc(r.description)}</td>
+        <td class="${c.repoVis}">${esc(r.owner)}</td>
         <td class="${c.repoVis}">${r.isPublic ? "public" : "private"}</td>
         <td class="${c.repoIdle}">${fmtDate(r.lastCommit)}</td>
       </tr>`,
     )
     .join("\n");
 
+  const createForm = user
+    ? `    <form method="post" action="/new" class="${c.cloneBox}">
+      <label class="${c.cloneLabel}">new repo</label>
+      <input type="text" name="name" placeholder="my-project" pattern="[A-Za-z0-9._-]+" required>
+      <button type="submit">create</button>
+    </form>`
+    : "";
+
   const body = `    <h1 class="${c.pageTitle}">repositories</h1>
+${createForm}
     <table class="${c.repoList}">
       <thead>
-        <tr><th>name</th><th>description</th><th>visibility</th><th>updated</th></tr>
+        <tr><th>name</th><th>description</th><th>owner</th><th>visibility</th><th>updated</th></tr>
       </thead>
       <tbody>
-${rows || `        <tr><td colspan="4" class="${c.empty}">no repositories visible</td></tr>`}
+${rows || `        <tr><td colspan="5" class="${c.empty}">no repositories visible</td></tr>`}
       </tbody>
     </table>`;
   return layout({ title: config.title, user, body });
@@ -103,12 +115,19 @@ export function summaryPage(opts: {
   name: string;
   description: string;
   isPublic: boolean;
+  owner: string;
   branch: string;
   commits: Commit[];
   user: SessionUser | null;
 }): string {
+  const meta = [
+    opts.isPublic ? "public" : "private",
+    opts.owner ? `owner: ${esc(opts.owner)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" &middot; ");
   const body = `    <h1 class="${c.pageTitle}">${esc(opts.name)}</h1>
-    <p class="${c.repoDesc}">${esc(opts.description)}</p>
+    <p class="${c.repoDesc}">${meta}</p>
 ${repoNav(opts.name, "summary")}
     <section class="${c.cloneBox}">
       <span class="${c.cloneLabel}">clone</span>
@@ -212,6 +231,54 @@ ${repoNav(opts.name, "log")}
     ${cm.body ? `<pre class="${c.code}">${esc(cm.body)}</pre>` : ""}
     <pre class="${c.code}"><code>${esc(cm.diff)}</code></pre>`;
   return layout({ title: cm.subject, user: opts.user, body });
+}
+
+export function tokensPage(opts: {
+  tokens: TokenRow[];
+  user: SessionUser | null;
+  newToken?: string | null;
+}): string {
+  const rows = opts.tokens
+    .map(
+      (t) => `      <tr>
+        <td>${esc(t.label)}</td>
+        <td class="${c.commitHash}">${esc(t.id)}</td>
+        <td class="${c.commitDate}">${fmtDate(t.created_at)}</td>
+        <td class="${c.commitDate}">${t.last_used ? fmtDate(t.last_used) : "never"}</td>
+        <td>
+          <form method="post" action="/tokens/${esc(t.id)}/revoke">
+            <button type="submit">revoke</button>
+          </form>
+        </td>
+      </tr>`,
+    )
+    .join("\n");
+
+  const created = opts.newToken
+    ? `    <section class="${c.cloneBox}">
+      <p><strong>New token — copy it now, it won't be shown again:</strong></p>
+      <code>${esc(opts.newToken)}</code>
+      <p class="${c.repoDesc}">Use it as the password (any username), e.g.<br>
+      <code>git remote add mirror ${esc(config.baseUrl.replace("://", `://x-token:${opts.newToken}@`))}/&lt;repo&gt;.git</code></p>
+    </section>`
+    : "";
+
+  const body = `    <h1 class="${c.pageTitle}">access tokens</h1>
+${created}
+    <form method="post" action="/tokens" class="${c.cloneBox}">
+      <label class="${c.cloneLabel}">label</label>
+      <input type="text" name="label" placeholder="laptop, backup cron, ...">
+      <button type="submit">create token</button>
+    </form>
+    <table>
+      <thead>
+        <tr><th>label</th><th>id</th><th>created</th><th>last used</th><th></th></tr>
+      </thead>
+      <tbody>
+${rows || `        <tr><td colspan="5" class="${c.empty}">no tokens yet</td></tr>`}
+      </tbody>
+    </table>`;
+  return layout({ title: "tokens", user: opts.user, body });
 }
 
 export function messagePage(opts: {

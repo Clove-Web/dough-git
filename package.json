@@ -6,8 +6,8 @@
   "private": true,
   "scripts": {
     "build": "node scripts/build.mjs",
-    "start": "node dist/server.js",
-    "dev": "npm run build && node dist/server.js",
+    "start": "node --experimental-sqlite --disable-warning=ExperimentalWarning dist/server.js",
+    "dev": "npm run build && npm start",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types test/transport.test.mjs"
   },
