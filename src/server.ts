@@ -27,6 +27,7 @@ import {
   repoExists,
   initBareRepo,
   createRepo,
+  deleteRepo,
   repoOwner,
   isRepoPublic,
   setRepoPublic,
@@ -371,6 +372,13 @@ app.post("/:name/visibility", async (c) => {
   const form = await c.req.formData();
   await setRepoPublic(name, form.get("public") === "on");
   return c.redirect(`/${name}/`);
+});
+
+app.post("/:name/delete", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.text("forbidden\n", 403);
+  await deleteRepo(c.req.param("name"));
+  return c.redirect("/");
 });
 
 app.get("/:name", async (c) => {

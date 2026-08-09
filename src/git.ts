@@ -11,6 +11,7 @@ import {
   writeFile,
   unlink,
   mkdir,
+  rm,
 } from "node:fs/promises";
 import { join } from "node:path";
 import { config } from "./config.ts";
@@ -62,6 +63,16 @@ export async function initBareRepo(name: string): Promise<boolean> {
   await exec("git", ["init", "--bare", "--initial-branch=main", dir], {
     encoding: "utf8",
   });
+  return true;
+}
+
+// Permanently delete a bare repo. Guarded by safeRepoName (no traversal) and by
+// requiring it to be a real repo (has HEAD) before removing anything.
+export async function deleteRepo(name: string): Promise<boolean> {
+  const dir = repoDir(name);
+  if (!dir) return false;
+  if (!(await repoExists(name))) return false;
+  await rm(dir, { recursive: true, force: true });
   return true;
 }
 

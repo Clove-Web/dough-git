@@ -135,6 +135,19 @@ export function summaryPage(opts: {
       : `    <h2 class="${c.sectionTitle}">recent commits</h2>
     ${commitTable(opts.name, opts.commits)}`;
 
+  const manage = opts.user
+    ? `    <h2 class="${c.sectionTitle}">manage</h2>
+    <div class="${c.repoTabs}">
+      <form method="post" action="/${esc(opts.name)}/visibility">
+        <input type="hidden" name="public" value="${opts.isPublic ? "" : "on"}">
+        <button type="submit">make ${opts.isPublic ? "private" : "public"}</button>
+      </form>
+      <form method="post" action="/${esc(opts.name)}/delete" onsubmit="return confirm('Delete ${esc(opts.name)} permanently? This cannot be undone.');">
+        <button type="submit">delete repository</button>
+      </form>
+    </div>`
+    : "";
+
   const body = `    <h1 class="${c.pageTitle}">${esc(opts.name)}</h1>
     <p class="${c.repoDesc}">${meta}</p>
 ${repoNav(opts.name, "summary")}
@@ -142,7 +155,8 @@ ${repoNav(opts.name, "summary")}
       <span class="${c.cloneLabel}">clone</span>
       <code>git clone ${esc(cloneUrl(opts.name))}</code>
     </section>
-${commitsSection}`;
+${commitsSection}
+${manage}`;
   return layout({ title: opts.name, user: opts.user, body });
 }
 
