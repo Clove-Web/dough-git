@@ -126,6 +126,15 @@ export function summaryPage(opts: {
   ]
     .filter(Boolean)
     .join(" &middot; ");
+  const commitsSection =
+    opts.commits.length === 0
+      ? `    <section class="${c.cloneBox}">
+      <p><strong>This repository is empty.</strong> Push to get started:</p>
+      <code>git remote add mirror ${esc(cloneUrl(opts.name))}<br>git push --mirror mirror</code>
+    </section>`
+      : `    <h2 class="${c.sectionTitle}">recent commits</h2>
+    ${commitTable(opts.name, opts.commits)}`;
+
   const body = `    <h1 class="${c.pageTitle}">${esc(opts.name)}</h1>
     <p class="${c.repoDesc}">${meta}</p>
 ${repoNav(opts.name, "summary")}
@@ -133,8 +142,7 @@ ${repoNav(opts.name, "summary")}
       <span class="${c.cloneLabel}">clone</span>
       <code>git clone ${esc(cloneUrl(opts.name))}</code>
     </section>
-    <h2 class="${c.sectionTitle}">recent commits</h2>
-    ${commitTable(opts.name, opts.commits)}`;
+${commitsSection}`;
   return layout({ title: opts.name, user: opts.user, body });
 }
 

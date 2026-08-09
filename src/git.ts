@@ -230,13 +230,19 @@ export async function log(
   const dir = repoDir(name);
   if (!dir) return [];
   const format = ["%H", "%an", "%ae", "%at", "%s"].join(FNUL);
-  const out = await git(dir, [
-    "log",
-    `--max-count=${limit}`,
-    `--format=${format}${FREC}`,
-    ref,
-    "--",
-  ]);
+  let out: string;
+  try {
+    out = await git(dir, [
+      "log",
+      `--max-count=${limit}`,
+      `--format=${format}${FREC}`,
+      ref,
+      "--",
+    ]);
+  } catch {
+    // Empty repo (no HEAD) or bad ref — nothing to show.
+    return [];
+  }
   return out
     .split(REC)
     .map((row) => row.replace(/^\n/, ""))
@@ -269,7 +275,12 @@ export async function tree(
   const dir = repoDir(name);
   if (!dir) return [];
   const spec = path ? `${ref}:${path}` : ref;
-  const out = await git(dir, ["ls-tree", "--long", spec]);
+  let out: string;
+  try {
+    out = await git(dir, ["ls-tree", "--long", spec]);
+  } catch {
+    return [];
+  }
   return out
     .split("\n")
     .filter((line) => line.trim().length > 0)
@@ -305,10 +316,15 @@ export async function blob(
 ): Promise<Blob | null> {
   const dir = repoDir(name);
   if (!dir) return null;
-  const { stdout } = await exec("git", ["-C", dir, "show", `${ref}:${path}`], {
-    maxBuffer: 64 * 1024 * 1024,
-    encoding: "buffer",
-  });
+  let stdout: Buffer;
+  try {
+    ({ stdout } = (await exec("git", ["-C", dir, "show", `${ref}:${path}`], {
+      maxBuffer: 64 * 1024 * 1024,
+      encoding: "buffer",
+    })) as unknown as { stdout: Buffer });
+  } catch {
+    return null;
+  }
   const buf = stdout as unknown as Buffer;
   const binary = buf.subarray(0, 8000).includes(0);
   return {
@@ -329,12 +345,12 @@ export async function commit(
   const dir = repoDir(name);
   if (!dir) return null;
   const format = ["%H", "%an", "%ae", "%at", "%s", "%b"].join(FNUL);
-  const out = await git(dir, [
-    "show",
-    `--format=${format}${FREC}`,
-    "--patch",
-    sha,
-  ]);
+  let out: string;
+  try {
+    out = await git(dir, ["show", `--format=${format}${FREC}`, "--patch", sha]);
+  } catch {
+    return null;
+  }
   const sep = out.indexOf(REC);
   if (sep === -1) return null;
   const meta = out.slice(0, sep).split(NUL);
