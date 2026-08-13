@@ -376,7 +376,7 @@ app.get("/:owner/:name", async (c) => {
   const ref = await viewable(c);
   if (!ref) return notFound(c);
   const [commits, isPublic, desc] = await Promise.all([
-    log(ref, "HEAD", 20),
+    log(ref, "HEAD", 1),
     isRepoPublic(ref),
     description(ref),
   ]);
@@ -386,7 +386,7 @@ app.get("/:owner/:name", async (c) => {
     view.summaryPage({
       ...ref,
       isPublic,
-      commits,
+      empty: commits.length === 0,
       readme: readmeFile,
       description: view.repoDescription({ ...ref, description: desc, readme: readmeFile }),
       user: c.get("user"),

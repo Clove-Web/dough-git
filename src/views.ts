@@ -178,21 +178,20 @@ export function summaryPage(opts: {
   owner: string;
   name: string;
   isPublic: boolean;
-  commits: Commit[];
+  empty: boolean;
   readme: Readme | null;
   description: string;
   user: SessionUser | null;
 }): string {
   const title = `${opts.owner}/${opts.name}`;
-  const empty = opts.commits.length === 0;
-  const commitsSection = empty
+  const empty = opts.empty;
+  const pushHint = empty
     ? `    <section class="${c.cloneBox}">
       <p><strong>This repository is empty.</strong> Push to get started:</p>
       <code>git remote add mirror ${esc(cloneUrl(opts.owner, opts.name))}<br>git push --mirror mirror</code>
       <p class="${c.repoDesc}">When prompted, use a token from <a href="/tokens">/tokens</a> as the <strong>password</strong> (username can be anything).</p>
     </section>`
-    : `    <h2 class="${c.sectionTitle}">recent commits</h2>
-    ${commitTable(opts.owner, opts.name, opts.commits)}`;
+    : "";
 
   // An empty repo has nothing to look for, so it only gets the push hint above.
   const readmeSection = empty
@@ -225,8 +224,8 @@ ${repoNav(opts.owner, opts.name, "summary")}
       <span class="${c.cloneLabel}">clone</span>
       <code>git clone ${esc(cloneUrl(opts.owner, opts.name))}</code>
     </section>
+${pushHint}
 ${readmeSection}
-${commitsSection}
 ${manage}`;
   return layout({
     title,
