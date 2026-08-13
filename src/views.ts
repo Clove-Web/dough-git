@@ -3,6 +3,7 @@
 
 import { config } from "./config.ts";
 import { classes as c } from "./styles/index.ts";
+import { escapeHtml, renderMarkdown, plainSummary } from "./markdown.ts";
 import type { SessionUser } from "./auth.ts";
 import type { TokenRow } from "./tokens.ts";
 import type {
@@ -10,15 +11,10 @@ import type {
   Commit,
   TreeEntry,
   CommitDetail,
+  Readme,
 } from "./git.ts";
 
-export function esc(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+export const esc = escapeHtml;
 
 function fmtDate(unix: number | null): string {
   if (!unix) return "";
@@ -34,10 +30,24 @@ function cloneUrl(owner: string, name: string): string {
   return `${config.baseUrl}/${owner}/${name}.git`;
 }
 
+// Collapse a description to one clean line of attribute-safe text.
+function metaText(s: string, max = 200): string {
+  const flat = s.replace(/\s+/g, " ").trim();
+  const clipped =
+    flat.length > max ? flat.slice(0, max - 1).replace(/\s+\S*$/, "") + "…" : flat;
+  return esc(clipped);
+}
+
 function layout(opts: {
   title: string;
   user: SessionUser | null;
   body: string;
+  // Page description for <meta description> / social previews.
+  description?: string;
+  // Site-absolute path of this page, for canonical + og:url.
+  path?: string;
+  // Private repos and account pages shouldn't end up in search results.
+  noindex?: boolean;
 }): string {
   const authLink = opts.user
     ? `<a class="${c.navLink}" href="/tokens">tokens</a>
@@ -45,12 +55,32 @@ function layout(opts: {
        <a class="${c.navLink}" href="/auth/logout">logout</a>`
     : `<a class="${c.navLink}" href="/auth/login">login</a>`;
 
+  const description = metaText(opts.description || config.description);
+  const url = opts.path ? esc(config.baseUrl + opts.path) : esc(config.baseUrl);
+  const icon = esc(config.favicon);
+
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${esc(opts.title)}</title>
+  <meta name="description" content="${description}">
+  <meta name="theme-color" content="${esc(config.themeColor)}">
+  <meta name="generator" content="dough-git">
+  ${opts.noindex ? `<meta name="robots" content="noindex, nofollow">` : `<link rel="canonical" href="${url}">`}
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="${esc(config.title)}">
+  <meta property="og:title" content="${esc(opts.title)}">
+  <meta property="og:description" content="${description}">
+  <meta property="og:url" content="${url}">
+  <meta property="og:image" content="${icon}">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="${esc(opts.title)}">
+  <meta name="twitter:description" content="${description}">
+  <meta name="twitter:image" content="${icon}">
+  <link rel="icon" href="${icon}">
+  <link rel="apple-touch-icon" href="${icon}">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -102,7 +132,7 @@ ${createForm}
 ${rows || `        <tr><td colspan="4" class="${c.empty}">no repositories visible</td></tr>`}
       </tbody>
     </table>`;
-  return layout({ title: config.title, user, body });
+  return layout({ title: config.title, user, body, path: "/" });
 }
 
 // The owner segment a new repo will be created under (the user's username).
@@ -149,18 +179,31 @@ export function summaryPage(opts: {
   name: string;
   isPublic: boolean;
   commits: Commit[];
+  readme: Readme | null;
+  description: string;
   user: SessionUser | null;
 }): string {
   const title = `${opts.owner}/${opts.name}`;
-  const commitsSection =
-    opts.commits.length === 0
-      ? `    <section class="${c.cloneBox}">
+  const empty = opts.commits.length === 0;
+  const commitsSection = empty
+    ? `    <section class="${c.cloneBox}">
       <p><strong>This repository is empty.</strong> Push to get started:</p>
       <code>git remote add mirror ${esc(cloneUrl(opts.owner, opts.name))}<br>git push --mirror mirror</code>
       <p class="${c.repoDesc}">When prompted, use a token from <a href="/tokens">/tokens</a> as the <strong>password</strong> (username can be anything).</p>
     </section>`
-      : `    <h2 class="${c.sectionTitle}">recent commits</h2>
+    : `    <h2 class="${c.sectionTitle}">recent commits</h2>
     ${commitTable(opts.owner, opts.name, opts.commits)}`;
+
+  // An empty repo has nothing to look for, so it only gets the push hint above.
+  const readmeSection = empty
+    ? ""
+    : opts.readme
+      ? `    <h2 class="${c.sectionTitle}">${esc(opts.readme.path)}</h2>
+    <article class="${c.readme}">
+${renderMarkdown(opts.readme.text)}
+    </article>`
+      : `    <h2 class="${c.sectionTitle}">readme</h2>
+    <p class="${c.empty}">No ReadMe was found, commit one to add a summary</p>`;
 
   const manage = opts.user
     ? `    <h2 class="${c.sectionTitle}">manage</h2>
@@ -182,9 +225,31 @@ ${repoNav(opts.owner, opts.name, "summary")}
       <span class="${c.cloneLabel}">clone</span>
       <code>git clone ${esc(cloneUrl(opts.owner, opts.name))}</code>
     </section>
+${readmeSection}
 ${commitsSection}
 ${manage}`;
-  return layout({ title, user: opts.user, body });
+  return layout({
+    title,
+    user: opts.user,
+    body,
+    description: opts.description,
+    path: `/${opts.owner}/${opts.name}`,
+    noindex: !opts.isPublic,
+  });
+}
+
+// Best available one-line description of a repo: git's own `description` file,
+// else the opening prose of the README, else a generic line.
+export function repoDescription(opts: {
+  owner: string;
+  name: string;
+  description: string;
+  readme: Readme | null;
+}): string {
+  if (opts.description.trim()) return opts.description;
+  const fromReadme = opts.readme ? plainSummary(opts.readme.text) : "";
+  if (fromReadme) return fromReadme;
+  return `${opts.owner}/${opts.name} — a git repository on ${config.title}.`;
 }
 
 export function logPage(opts: {
@@ -197,7 +262,13 @@ export function logPage(opts: {
   const body = `    <h1 class="${c.pageTitle}">${esc(title)} &middot; log</h1>
 ${repoNav(opts.owner, opts.name, "log")}
     ${commitTable(opts.owner, opts.name, opts.commits)}`;
-  return layout({ title: `${title} log`, user: opts.user, body });
+  return layout({
+    title: `${title} log`,
+    user: opts.user,
+    body,
+    description: `Commit history for ${title}.`,
+    path: `/${opts.owner}/${opts.name}/log`,
+  });
 }
 
 export function treePage(opts: {
@@ -229,7 +300,13 @@ ${repoNav(opts.owner, opts.name, "tree")}
 ${rows || `        <tr><td class="${c.empty}">empty</td></tr>`}
       </tbody>
     </table>`;
-  return layout({ title: `${opts.owner}/${opts.name} tree`, user: opts.user, body });
+  return layout({
+    title: `${opts.owner}/${opts.name} tree`,
+    user: opts.user,
+    body,
+    description: `Files in ${opts.owner}/${opts.name}${opts.path ? ` at ${opts.path}` : ""}.`,
+    path: `${b}/tree${opts.path ? `/${opts.path}` : ""}`,
+  });
 }
 
 export function blobPage(opts: {
@@ -246,7 +323,13 @@ export function blobPage(opts: {
   const body = `    <h1 class="${c.pageTitle}">${esc(opts.owner)}/${esc(opts.name)} &middot; ${esc(opts.path)}</h1>
 ${repoNav(opts.owner, opts.name, "tree")}
     ${content}`;
-  return layout({ title: opts.path, user: opts.user, body });
+  return layout({
+    title: opts.path,
+    user: opts.user,
+    body,
+    description: `${opts.path} in ${opts.owner}/${opts.name}.`,
+    path: `${base(opts.owner, opts.name)}/blob/${opts.path}`,
+  });
 }
 
 export function commitPage(opts: {
@@ -265,7 +348,13 @@ ${repoNav(opts.owner, opts.name, "log")}
     </dl>
     ${cm.body ? `<pre class="${c.code}">${esc(cm.body)}</pre>` : ""}
     <pre class="${c.code}"><code>${esc(cm.diff)}</code></pre>`;
-  return layout({ title: cm.subject, user: opts.user, body });
+  return layout({
+    title: cm.subject,
+    user: opts.user,
+    body,
+    description: `${cm.subject} — ${cm.author} in ${opts.owner}/${opts.name}.`,
+    path: `${base(opts.owner, opts.name)}/commit/${cm.hash}`,
+  });
 }
 
 export function tokensPage(opts: {
@@ -314,7 +403,13 @@ ${created}
 ${rows || `        <tr><td colspan="5" class="${c.empty}">no tokens yet</td></tr>`}
       </tbody>
     </table>`;
-  return layout({ title: "tokens", user: opts.user, body });
+  return layout({
+    title: "access tokens",
+    user: opts.user,
+    body,
+    description: "Manage git access tokens.",
+    noindex: true,
+  });
 }
 
 export function messagePage(opts: {
@@ -325,5 +420,11 @@ export function messagePage(opts: {
 }): string {
   const body = `    <h1 class="${c.pageTitle}">${esc(opts.title)}</h1>
     <p class="${c.message}">${esc(opts.message)}</p>`;
-  return layout({ title: opts.title, user: opts.user, body });
+  return layout({
+    title: opts.title,
+    user: opts.user,
+    body,
+    description: opts.message,
+    noindex: true,
+  });
 }

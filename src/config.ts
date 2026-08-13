@@ -25,6 +25,23 @@ export const config = {
   // Directory whose files are served at /static (drop your own style.css here).
   staticDir: optional("MINIGIT_STATIC_DIR", "./public"),
 
+  // Site icon. Used as the favicon and as the social-preview image, so it wants
+  // to be an absolute URL that works off-site.
+  favicon: optional(
+    "MINIGIT_FAVICON",
+    "https://m.doughmination.gay/img/avatars/git.png",
+  ),
+
+  // Fallback <meta name="description"> for pages that don't derive their own.
+  description: optional(
+    "MINIGIT_DESCRIPTION",
+    "A minimal self-hosted git mirror.",
+  ),
+
+  // Browser UI colour on mobile. Matches the theme background in
+  // src/styles/theme.css.ts.
+  themeColor: optional("MINIGIT_THEME_COLOR", "#0a0b10"),
+
   // Marker filename that makes a bare repo public. Absent = private.
   publicMarker: optional("MINIGIT_PUBLIC_MARKER", "minigit-public"),
 

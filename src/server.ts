@@ -36,6 +36,8 @@ import {
   tree,
   blob,
   commit,
+  readme,
+  description,
   type RepoRef,
 } from "./git.ts";
 import {
@@ -373,12 +375,22 @@ app.post("/:owner/:name/delete", async (c) => {
 app.get("/:owner/:name", async (c) => {
   const ref = await viewable(c);
   if (!ref) return notFound(c);
-  const [commits, isPublic] = await Promise.all([
+  const [commits, isPublic, desc] = await Promise.all([
     log(ref, "HEAD", 20),
     isRepoPublic(ref),
+    description(ref),
   ]);
+  // An empty repo has no tree to search, so skip the README lookup entirely.
+  const readmeFile = commits.length ? await readme(ref, "HEAD") : null;
   return c.html(
-    view.summaryPage({ ...ref, isPublic, commits, user: c.get("user") }),
+    view.summaryPage({
+      ...ref,
+      isPublic,
+      commits,
+      readme: readmeFile,
+      description: view.repoDescription({ ...ref, description: desc, readme: readmeFile }),
+      user: c.get("user"),
+    }),
   );
 });
 

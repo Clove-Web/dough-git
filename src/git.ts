@@ -315,6 +315,34 @@ export async function blob(ref: RepoRef, refspec: string, path: string): Promise
   return { text: binary ? "" : stdout.toString("utf8"), binary };
 }
 
+export interface Readme {
+  path: string; // the filename as committed, e.g. "ReadMe.md"
+  text: string;
+}
+
+// README filenames we'll render, matched case-insensitively. An extensionless
+// README is accepted too — it's still conventionally Markdown.
+const README = /^readme(\.(?:md|markdown|mdown|mkd))?$/i;
+const README_MD = /^readme\.(?:md|markdown|mdown|mkd)$/i;
+
+// Fetch the README at the root of `refspec`'s tree. Prefers an explicit
+// Markdown extension when a repo carries both `README` and `README.md`.
+export async function readme(ref: RepoRef, refspec: string): Promise<Readme | null> {
+  const entries = await tree(ref, refspec, "");
+  const blobs = entries.filter((e) => e.type === "blob");
+  const hit =
+    blobs.find((e) => README_MD.test(e.name)) ?? blobs.find((e) => README.test(e.name));
+  if (!hit) return null;
+  const content = await blob(ref, refspec, hit.name);
+  if (!content || content.binary) return null;
+  return { path: hit.name, text: content.text };
+}
+
+// The repo's `description` file (git's own), or "" when unset.
+export async function description(ref: RepoRef): Promise<string> {
+  return readDescription(refDir(ref));
+}
+
 export interface CommitDetail extends Commit {
   body: string;
   diff: string;
