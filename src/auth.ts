@@ -1,17 +1,20 @@
-// Authentication, with no database.
+// Authentication.
 //
 //  * Browser login  -> PocketID (OIDC). The resulting identity is stored in a
-//    stateless, HMAC-signed session cookie.
-//  * git clone/pull/push -> HTTP Basic auth whose password is one of the tokens
-//    in MINIGIT_GIT_TOKENS.
+//    stateless, HMAC-signed session cookie; the account itself is recorded in
+//    the user directory (users.ts) so its owner slug is stable.
+//  * git clone/pull/push -> HTTP Basic auth. The password is a token; the
+//    username is the owner slug the token belongs to.
 //
 // Session and OAuth-transaction state live entirely in signed cookies, so there
-// is nothing to persist.
+// is no server-side session store.
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import * as oidc from "openid-client";
 import { config, oidcEnabled } from "./config.ts";
 import { verifyDbToken } from "./tokens.ts";
+import { rememberUser } from "./users.ts";
+import { ownerSlug } from "./git.ts";
 
 // ---- signed values ----------------------------------------------------------
 
@@ -63,6 +66,14 @@ export interface SessionUser {
   email: string | null;
   name: string | null;
   username: string | null; // PocketID preferred_username
+  slug: string; // owner namespace; assigned once, in users.ts
+  picture: string | null; // PocketID avatar URL
+}
+
+// Sessions minted before slug/picture existed are still validly signed, so read
+// them defensively rather than logging everyone out.
+export function sessionSlug(user: SessionUser): string {
+  return user.slug || ownerSlug(user.username ?? user.name ?? "user");
 }
 
 const SESSION_TTL = 60 * 60 * 24 * 30; // 30 days
@@ -101,9 +112,7 @@ export function parseBasicAuth(
   return [decoded.slice(0, idx), decoded.slice(idx + 1)];
 }
 
-// Check a presented token against the static env set (constant-time) and then
-// the SQLite-backed tokens.
-export function isValidGitToken(token: string): boolean {
+function isStaticToken(token: string): boolean {
   const candidate = Buffer.from(token);
   for (const known of config.gitTokens) {
     const target = Buffer.from(known);
@@ -114,7 +123,68 @@ export function isValidGitToken(token: string): boolean {
       return true;
     }
   }
-  return verifyDbToken(token);
+  return false;
+}
+
+// What a set of Basic credentials is allowed to be.
+export type GitAuth =
+  // A token from MINIGIT_GIT_TOKENS: instance-wide, not tied to an account.
+  | { kind: "instance" }
+  // A token minted at /tokens, acting as exactly one owner namespace.
+  | { kind: "user"; owner: string }
+  // No credentials at all — the caller should send a Basic challenge.
+  | { kind: "anonymous" }
+  // Credentials were presented and are not usable. `message` is written back to
+  // the git client, so it has to say what to fix.
+  | { kind: "rejected"; message: string };
+
+// Resolve `Authorization: Basic ...` into what it may act as.
+//
+// The username half is no longer decorative: for an account token it must be
+// that account's owner slug. Requiring it means a push URL names who is pushing,
+// which is what makes `owner/repo` paths mean anything.
+export function authenticateGit(header: string | undefined): GitAuth {
+  const basic = parseBasicAuth(header);
+  if (!basic) return { kind: "anonymous" };
+
+  const [username, token] = basic;
+  if (!token) return { kind: "anonymous" };
+
+  if (isStaticToken(token)) return { kind: "instance" };
+
+  const row = verifyDbToken(token);
+  if (!row) return { kind: "rejected", message: "invalid or revoked token" };
+
+  if (!row.owner) {
+    return {
+      kind: "rejected",
+      message:
+        "this token predates per-user ownership and can't be attributed — " +
+        "sign in to the web UI once to adopt it, or mint a new one at /tokens",
+    };
+  }
+
+  // Accept the slug itself, and also the raw username it was derived from, so
+  // `https://Alex.Kim:token@host/...` still works for owner `alex-kim`.
+  const named =
+    username !== "" &&
+    (username === row.owner || ownerSlug(username) === row.owner);
+  if (!named) {
+    return {
+      kind: "rejected",
+      message: username
+        ? `this token belongs to "${row.owner}" — use that as the username`
+        : `set the username to "${row.owner}" (the token alone is not enough)`,
+    };
+  }
+
+  return { kind: "user", owner: row.owner };
+}
+
+// True if this identity may write to (and auto-create) repos under `owner`.
+export function canPushTo(auth: GitAuth, owner: string): boolean {
+  if (auth.kind === "instance") return true;
+  return auth.kind === "user" && auth.owner === owner;
 }
 
 // ---- OIDC (PocketID) --------------------------------------------------------
@@ -210,7 +280,7 @@ export async function finishLogin(
     return null;
   }
 
-  const user: SessionUser = {
+  const claimed = {
     sub: String(claims.sub),
     email: typeof claims.email === "string" ? claims.email : null,
     name: typeof claims.name === "string" ? claims.name : null,
@@ -218,7 +288,9 @@ export async function finishLogin(
       typeof claims.preferred_username === "string"
         ? claims.preferred_username
         : null,
+    picture: typeof claims.picture === "string" ? claims.picture : null,
   };
+  const user: SessionUser = { ...claimed, slug: "" };
   if (!isAllowed(user)) {
     console.error(
       `[auth] login denied by ALLOWED_USERS. Authenticated as ` +
@@ -227,7 +299,11 @@ export async function finishLogin(
     );
     return null;
   }
-  return user;
+
+  // Only now, past the allow-list, does the account earn a directory entry and
+  // with it a permanent owner slug.
+  const row = rememberUser(claimed);
+  return { ...user, slug: row.slug };
 }
 
 export { oidcEnabled };

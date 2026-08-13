@@ -20,30 +20,98 @@ const readme = style({
 export const classes = {
   readme,
 
+  // Three columns rather than space-between, so the middle zone stays centred
+  // on the page even when the two sides are different widths.
   siteHeader: style({
-    display: "flex",
-    justifyContent: "space-between",
+    display: "grid",
+    gridTemplateColumns: "1fr auto 1fr",
     alignItems: "center",
+    gap: "1rem",
     padding: "0.75rem 1.25rem",
     borderBottom: `1px solid ${vars.border}`,
     background: vars.bgRaised,
   }),
 
   siteTitle: style({
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
     fontWeight: 700,
     fontSize: "1.1rem",
     color: vars.text,
   }),
 
+  siteLogo: style({
+    width: "1.5rem",
+    height: "1.5rem",
+    borderRadius: "0.25rem",
+    objectFit: "cover",
+  }),
+
+  siteWho: style({
+    display: "flex",
+    justifyContent: "center",
+    minWidth: 0,
+  }),
+
   siteNav: style({
     display: "flex",
     alignItems: "center",
+    justifyContent: "flex-end",
     gap: "0.75rem",
   }),
 
   navLink: style({ color: vars.accent }),
 
-  user: style({ color: vars.textMuted }),
+  user: style({
+    display: "flex",
+    alignItems: "center",
+    gap: "0.4rem",
+    minWidth: 0,
+    color: vars.textMuted,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  }),
+
+  // Circle holding a first initial, with the IDP's avatar layered on top when
+  // it loads. Sized inline by the caller.
+  avatar: style({
+    position: "relative",
+    flexShrink: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "50%",
+    background: vars.surfaceHi,
+    color: vars.textSoft,
+    fontWeight: 600,
+    lineHeight: 1,
+    overflow: "hidden",
+    userSelect: "none",
+  }),
+
+  avatarImg: style({
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+  }),
+
+  profileHead: style({
+    display: "flex",
+    alignItems: "center",
+    gap: "1rem",
+    margin: "0.5rem 0 1.5rem",
+  }),
+
+  profileName: style({
+    fontSize: "1.4rem",
+    margin: 0,
+  }),
+
+  ownerLink: style({ color: vars.textMuted }),
 
   content: style({
     maxWidth: "960px",

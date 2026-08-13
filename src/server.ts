@@ -16,11 +16,12 @@ import {
   startLogin,
   finishLogin,
   oidcIssuer,
-  parseBasicAuth,
-  isValidGitToken,
+  authenticateGit,
+  canPushTo,
   type SessionUser,
 } from "./auth.ts";
 import { listTokens, createToken, revokeToken } from "./tokens.ts";
+import { findUserBySlug } from "./users.ts";
 import {
   safeRef,
   refDir,
@@ -180,23 +181,25 @@ app.get("/auth/logout", (c) => {
 app.get("/tokens", (c) => {
   const user = c.get("user");
   if (!user) return c.redirect("/auth/login");
-  return c.html(view.tokensPage({ tokens: listTokens(), user }));
+  const owner = view.ownerOf(user);
+  return c.html(view.tokensPage({ tokens: listTokens(owner), user }));
 });
 
 app.post("/tokens", async (c) => {
   const user = c.get("user");
   if (!user) return c.text("forbidden\n", 403);
+  const owner = view.ownerOf(user);
   const form = await c.req.formData();
-  const plaintext = createToken(String(form.get("label") ?? ""), user.sub);
+  const plaintext = createToken(String(form.get("label") ?? ""), owner, user.sub);
   return c.html(
-    view.tokensPage({ tokens: listTokens(), user, newToken: plaintext }),
+    view.tokensPage({ tokens: listTokens(owner), user, newToken: plaintext }),
   );
 });
 
-app.post("/tokens/:id/revoke", async (c) => {
+app.post("/tokens/:id/revoke", (c) => {
   const user = c.get("user");
   if (!user) return c.text("forbidden\n", 403);
-  revokeToken(c.req.param("id"));
+  revokeToken(c.req.param("id"), view.ownerOf(user));
   return c.redirect("/tokens");
 });
 
@@ -226,8 +229,8 @@ app.post("/new", async (c) => {
 
 const GIT_SERVICES: GitService[] = ["git-upload-pack", "git-receive-pack"];
 
-function authChallenge(): Response {
-  return new Response("authentication required\n", {
+function authChallenge(message = "authentication required"): Response {
+  return new Response(`${message}\n`, {
     status: 401,
     headers: { "WWW-Authenticate": 'Basic realm="dough-git"' },
   });
@@ -241,12 +244,30 @@ async function gitGate(
   ref: RepoRef,
   needPush: boolean,
 ): Promise<Response | null> {
-  const basic = parseBasicAuth(c.req.header("authorization"));
-  const hasToken = Boolean(basic && isValidGitToken(basic[1]));
+  const auth = authenticateGit(c.req.header("authorization"));
   const exists = await repoExists(ref);
 
+  // Bad credentials are a dead end, not a retry: re-prompting just loops the
+  // credential helper past the same wrong username.
+  if (auth.kind === "rejected") {
+    console.warn(`[git] denied ${refSlug(ref)}: ${auth.message}`);
+    return new Response(`${auth.message}\n`, { status: 403 });
+  }
+
   if (needPush) {
-    if (!hasToken) return authChallenge();
+    if (auth.kind === "anonymous") return authChallenge();
+    if (!canPushTo(auth, ref.owner)) {
+      const who = auth.kind === "user" ? auth.owner : "this token";
+      console.warn(
+        `[git] denied push to ${refSlug(ref)} by ${who} (not their namespace)`,
+      );
+      return new Response(
+        `${who} can only push to repositories under ${
+          auth.kind === "user" ? `${auth.owner}/` : "its own namespace"
+        }\n`,
+        { status: 403 },
+      );
+    }
     if (!exists) {
       if (!config.autoCreate) {
         return new Response("repository not found\n", { status: 404 });
@@ -259,8 +280,10 @@ async function gitGate(
 
   if (!exists) return new Response("repository not found\n", { status: 404 });
   if (await isRepoPublic(ref)) return null;
-  if (hasToken) return null;
-  return authChallenge();
+  // Reads of a private repo stay open to any valid token, matching what a
+  // signed-in browser can already see on this instance.
+  if (auth.kind === "anonymous") return authChallenge();
+  return null;
 }
 
 app.get("/:owner/:repo/info/refs", async (c) => {
@@ -354,22 +377,46 @@ app.get("/:owner/:name/commit/:sha", async (c) => {
   return c.html(view.commitPage({ ...ref, commit: detail, user: c.get("user") }));
 });
 
-app.post("/:owner/:name/visibility", async (c) => {
+// Resolve params for a management action: the repo must exist and belong to the
+// caller. Same rule the git transport applies to a push.
+async function ownedRef(c: any): Promise<RepoRef | null> {
   const user = c.get("user");
-  if (!user) return c.text("forbidden\n", 403);
+  if (!user) return null;
   const ref = safeRef(c.req.param("owner"), c.req.param("name"));
-  if (!ref || !(await repoExists(ref))) return notFound(c);
+  if (!ref || ref.owner !== view.ownerOf(user)) return null;
+  return (await repoExists(ref)) ? ref : null;
+}
+
+app.post("/:owner/:name/visibility", async (c) => {
+  const ref = await ownedRef(c);
+  if (!ref) return notFound(c);
   const form = await c.req.formData();
   await setRepoPublic(ref, form.get("public") === "on");
   return c.redirect(`/${ref.owner}/${ref.name}/`);
 });
 
 app.post("/:owner/:name/delete", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.text("forbidden\n", 403);
-  const ref = safeRef(c.req.param("owner"), c.req.param("name"));
-  if (ref) await deleteRepo(ref);
+  const ref = await ownedRef(c);
+  if (!ref) return notFound(c);
+  await deleteRepo(ref);
   return c.redirect("/");
+});
+
+// Profile page. Registered before the two-segment repo routes only for
+// readability — they differ in path length, so they can't collide.
+app.get("/:owner", async (c) => {
+  const owner = c.req.param("owner");
+  if (!safeRef(owner, "x")) return notFound(c);
+
+  const user = c.get("user");
+  const all = await listRepos();
+  const owned = all.filter((r) => r.owner === owner);
+  const repos = user ? owned : owned.filter((r) => r.isPublic);
+  const profile = findUserBySlug(owner);
+
+  // Nobody by that name, and nothing of theirs to show.
+  if (!profile && owned.length === 0) return notFound(c);
+  return c.html(view.profilePage({ owner, profile, repos, user }));
 });
 
 app.get("/:owner/:name", async (c) => {

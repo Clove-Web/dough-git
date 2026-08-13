@@ -4,8 +4,10 @@
 import { config } from "./config.ts";
 import { classes as c } from "./styles/index.ts";
 import { escapeHtml, renderMarkdown, plainSummary } from "./markdown.ts";
+import { sessionSlug } from "./auth.ts";
 import type { SessionUser } from "./auth.ts";
 import type { TokenRow } from "./tokens.ts";
+import type { UserRow } from "./users.ts";
 import type {
   RepoSummary,
   Commit,
@@ -38,6 +40,29 @@ function metaText(s: string, max = 200): string {
   return esc(clipped);
 }
 
+// The shared shape of "a person" across sessions and directory rows.
+interface Profile {
+  name: string | null;
+  username: string | null;
+  picture: string | null;
+}
+
+export function displayName(p: Profile & { sub?: string }): string {
+  return p.name ?? p.username ?? p.sub ?? "user";
+}
+
+// Avatar from PocketID's `picture` claim, over a first-initial fallback. The
+// IDP may serve avatars only to signed-in browsers, so a failed image drops
+// itself and uncovers the initial rather than leaving a broken-image box.
+function avatar(p: Profile, size: number): string {
+  const initial = esc(displayName(p).trim().slice(0, 1).toUpperCase() || "?");
+  const box = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.5)}px`;
+  const img = p.picture
+    ? `<img class="${c.avatarImg}" src="${esc(p.picture)}" alt="" loading="lazy" onerror="this.remove()">`
+    : "";
+  return `<span class="${c.avatar}" style="${box}">${initial}${img}</span>`;
+}
+
 function layout(opts: {
   title: string;
   user: SessionUser | null;
@@ -49,15 +74,23 @@ function layout(opts: {
   // Private repos and account pages shouldn't end up in search results.
   noindex?: boolean;
 }): string {
-  const authLink = opts.user
+  // Three zones: home on the left, who you are in the middle, settings right.
+  const whoami = opts.user
+    ? `<a class="${c.user}" href="/${esc(ownerOf(opts.user))}">${avatar(opts.user, 22)}${esc(displayName(opts.user))}</a>`
+    : "";
+  const settings = opts.user
     ? `<a class="${c.navLink}" href="/tokens">tokens</a>
-       <span class="${c.user}">${esc(opts.user.name ?? opts.user.username ?? opts.user.sub)}</span>
        <a class="${c.navLink}" href="/auth/logout">logout</a>`
     : `<a class="${c.navLink}" href="/auth/login">login</a>`;
 
   const description = metaText(opts.description || config.description);
   const url = opts.path ? esc(config.baseUrl + opts.path) : esc(config.baseUrl);
   const icon = esc(config.favicon);
+  // Same image as the favicon, doubling as the header mark. Decorative: the
+  // title text right next to it already names the site.
+  const logo = config.favicon
+    ? `<img class="${c.siteLogo}" src="${icon}" alt="" width="24" height="24">`
+    : "";
 
   return `<!doctype html>
 <html lang="en">
@@ -85,8 +118,9 @@ function layout(opts: {
 </head>
 <body>
   <header class="${c.siteHeader}">
-    <a class="${c.siteTitle}" href="/">${esc(config.title)}</a>
-    <nav class="${c.siteNav}">${authLink}</nav>
+    <a class="${c.siteTitle}" href="/">${logo}${esc(config.title)}</a>
+    <div class="${c.siteWho}">${whoami}</div>
+    <nav class="${c.siteNav}">${settings}</nav>
   </header>
   <main class="${c.content}">
 ${opts.body}
@@ -98,21 +132,40 @@ ${opts.body}
 </html>`;
 }
 
+// The repo table shared by the front page and the profile pages. `showOwner`
+// is off on a profile, where every row has the same owner as the heading.
+function repoTable(
+  repos: RepoSummary[],
+  opts: { showOwner: boolean; empty: string },
+): string {
+  const rows = repos
+    .map((r) => {
+      const owner = opts.showOwner
+        ? `<a class="${c.ownerLink}" href="/${esc(r.owner)}">${esc(r.owner)}</a>/`
+        : "";
+      return `      <tr class="${c.repoRow}">
+        <td class="${c.repoName}">${owner}<a href="${base(r.owner, r.name)}/">${esc(r.name)}</a></td>
+        <td class="${c.repoDesc}">${esc(r.description)}</td>
+        <td class="${c.repoVis}">${r.isPublic ? "public" : "private"}</td>
+        <td class="${c.repoIdle}">${fmtDate(r.lastCommit)}</td>
+      </tr>`;
+    })
+    .join("\n");
+
+  return `<table class="${c.repoList}">
+      <thead>
+        <tr><th>repository</th><th>description</th><th>visibility</th><th>updated</th></tr>
+      </thead>
+      <tbody>
+${rows || `        <tr><td colspan="4" class="${c.empty}">${esc(opts.empty)}</td></tr>`}
+      </tbody>
+    </table>`;
+}
+
 export function repoListPage(
   repos: RepoSummary[],
   user: SessionUser | null,
 ): string {
-  const rows = repos
-    .map(
-      (r) => `      <tr class="${c.repoRow}">
-        <td class="${c.repoName}"><a href="${base(r.owner, r.name)}/">${esc(r.owner)}/${esc(r.name)}</a></td>
-        <td class="${c.repoDesc}">${esc(r.description)}</td>
-        <td class="${c.repoVis}">${r.isPublic ? "public" : "private"}</td>
-        <td class="${c.repoIdle}">${fmtDate(r.lastCommit)}</td>
-      </tr>`,
-    )
-    .join("\n");
-
   const createForm = user
     ? `    <form method="post" action="/new" class="${c.cloneBox}">
       <label class="${c.cloneLabel}">new repo</label>
@@ -124,24 +177,56 @@ export function repoListPage(
 
   const body = `    <h1 class="${c.pageTitle}">repositories</h1>
 ${createForm}
-    <table class="${c.repoList}">
-      <thead>
-        <tr><th>repository</th><th>description</th><th>visibility</th><th>updated</th></tr>
-      </thead>
-      <tbody>
-${rows || `        <tr><td colspan="4" class="${c.empty}">no repositories visible</td></tr>`}
-      </tbody>
-    </table>`;
+    ${repoTable(repos, { showOwner: true, empty: "no repositories visible" })}`;
   return layout({ title: config.title, user, body, path: "/" });
 }
 
-// The owner segment a new repo will be created under (the user's username).
+// A deliberately small profile: who this is, and what they own. Anything more
+// (activity feeds, bios, follower counts) is a different kind of site.
+export function profilePage(opts: {
+  owner: string;
+  profile: UserRow | null;
+  repos: RepoSummary[];
+  user: SessionUser | null;
+}): string {
+  const p = opts.profile;
+  const name = p ? displayName(p) : opts.owner;
+  // The slug is the handle; only mention the upstream username when it says
+  // something the slug doesn't (a rename, or characters the slug dropped).
+  const handle = p?.username && p.username !== p.slug ? p.username : null;
+
+  const known = p
+    ? `<p class="${c.repoDesc}">@${esc(p.slug)}${handle ? ` &middot; ${esc(handle)}` : ""} &middot; joined ${fmtDate(p.created_at).slice(0, 10)}</p>`
+    // Repos can outlive their account (or arrive by push before anyone logs
+    // in), so an owner directory with no user row still gets a page.
+    : `<p class="${c.repoDesc}">@${esc(opts.owner)} &middot; no account on this instance</p>`;
+
+  const body = `    <section class="${c.profileHead}">
+      ${avatar(p ?? { name: opts.owner, username: null, picture: null }, 64)}
+      <div>
+        <h1 class="${c.profileName}">${esc(name)}</h1>
+        ${known}
+      </div>
+    </section>
+    <h2 class="${c.sectionTitle}">repositories</h2>
+    ${repoTable(opts.repos, { showOwner: false, empty: "nothing here yet" })}`;
+
+  return layout({
+    title: name,
+    user: opts.user,
+    body,
+    description: `${name} (@${opts.owner}) on ${config.title}.`,
+    path: `/${opts.owner}`,
+    // Someone with nothing public shouldn't be indexed into existence by their
+    // presence on a mostly-private instance.
+    noindex: !opts.repos.some((r) => r.isPublic),
+  });
+}
+
+// The owner segment this user's repos live under. Assigned once at first login
+// and carried in the session; see users.ts for why it can't be re-derived.
 export function ownerOf(user: SessionUser): string {
-  return (user.username ?? user.name ?? "user")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "user";
+  return sessionSlug(user);
 }
 
 function repoNav(owner: string, name: string, active: string): string {
@@ -189,7 +274,7 @@ export function summaryPage(opts: {
     ? `    <section class="${c.cloneBox}">
       <p><strong>This repository is empty.</strong> Push to get started:</p>
       <code>git remote add mirror ${esc(cloneUrl(opts.owner, opts.name))}<br>git push --mirror mirror</code>
-      <p class="${c.repoDesc}">When prompted, use a token from <a href="/tokens">/tokens</a> as the <strong>password</strong> (username can be anything).</p>
+      <p class="${c.repoDesc}">When prompted, the <strong>username</strong> is <code>${esc(opts.owner)}</code> and the <strong>password</strong> is a token from <a href="/tokens">/tokens</a>.</p>
     </section>`
     : "";
 
@@ -204,7 +289,8 @@ ${renderMarkdown(opts.readme.text)}
       : `    <h2 class="${c.sectionTitle}">readme</h2>
     <p class="${c.empty}">No ReadMe was found, commit one to add a summary</p>`;
 
-  const manage = opts.user
+  // Only the owner manages a repo — matching what the git transport enforces.
+  const manage = opts.user && ownerOf(opts.user) === opts.owner
     ? `    <h2 class="${c.sectionTitle}">manage</h2>
     <div class="${c.repoTabs}">
       <form method="post" action="${base(opts.owner, opts.name)}/visibility">
@@ -217,7 +303,7 @@ ${renderMarkdown(opts.readme.text)}
     </div>`
     : "";
 
-  const body = `    <h1 class="${c.pageTitle}">${esc(title)}</h1>
+  const body = `    <h1 class="${c.pageTitle}"><a class="${c.ownerLink}" href="/${esc(opts.owner)}">${esc(opts.owner)}</a>/${esc(opts.name)}</h1>
     <p class="${c.repoDesc}">${opts.isPublic ? "public" : "private"}</p>
 ${repoNav(opts.owner, opts.name, "summary")}
     <section class="${c.cloneBox}">
@@ -382,12 +468,15 @@ export function tokensPage(opts: {
     ? `    <section class="${c.cloneBox}">
       <p><strong>New token — copy it now, it won't be shown again:</strong></p>
       <code>${esc(opts.newToken)}</code>
-      <p class="${c.repoDesc}">The token is your <strong>password</strong> — the username can be anything. Ready-to-use remote:<br>
+      <p class="${c.repoDesc}">Ready-to-use remote:<br>
       <code>git remote add mirror ${esc(config.baseUrl.replace("://", `://${authUser}:${opts.newToken}@`))}/${esc(authUser)}/&lt;repo&gt;.git</code></p>
     </section>`
     : "";
 
   const body = `    <h1 class="${c.pageTitle}">access tokens</h1>
+    <p class="${c.repoDesc}">These tokens act as <code>${esc(authUser)}</code>: use that as the git
+    <strong>username</strong> and the token as the <strong>password</strong>. They can only push to
+    repositories under <code>${esc(authUser)}/</code>.</p>
 ${created}
     <form method="post" action="/tokens" class="${c.cloneBox}">
       <label class="${c.cloneLabel}">label</label>
