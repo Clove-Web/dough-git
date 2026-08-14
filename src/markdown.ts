@@ -1,3 +1,5 @@
+/* src/markdown.ts */
+//
 // A small, deliberately safe Markdown renderer for repository READMEs.
 //
 // Why hand-rolled rather than a library: README content is attacker-controlled
@@ -53,6 +55,10 @@ function safeUrl(raw: string): string | null {
   const url = raw.trim();
   if (!url) return null;
   if (ABSOLUTE.test(url)) return /^(?:https?|mailto):/i.test(url) ? url : null;
+  // `//host` and `\\host` are scheme-relative, not relative: they leave the
+  // site while looking local. A README link that means to go off-site can say
+  // so with a scheme.
+  if (/^[/\\]{2}/.test(url)) return null;
   return url;
 }
 

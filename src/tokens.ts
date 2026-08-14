@@ -1,10 +1,12 @@
+/* src/tokens.ts */
+//
 // SQLite-backed git access tokens, managed from the browser.
 //
 // Only token *hashes* are stored; the plaintext is shown once at creation.
 // Every token is bound to the owner slug of whoever minted it, which is what
-// lets the transport refuse a push into somebody else's namespace. Static
-// tokens from MINIGIT_GIT_TOKENS keep working alongside these and are instance-
-// wide (see auth.ts).
+// lets the transport refuse a push into somebody else's namespace. There is no
+// instance-wide credential: a token is always somebody in particular, and what
+// that somebody may reach is decided in access.ts.
 
 import { randomBytes, createHash } from "node:crypto";
 import { db, now, hasColumn } from "./db.ts";

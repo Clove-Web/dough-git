@@ -1,3 +1,5 @@
+/* src/auth.ts */
+//
 // Authentication.
 //
 //  * Browser login  -> PocketID (OIDC). The resulting identity is stored in a
@@ -13,7 +15,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import * as oidc from "openid-client";
 import { config, oidcEnabled } from "./config.ts";
 import { verifyDbToken } from "./tokens.ts";
-import { rememberUser } from "./users.ts";
+import { rememberUser, findUserBySub } from "./users.ts";
 import { ownerSlug } from "./git.ts";
 
 // ---- signed values ----------------------------------------------------------
@@ -90,13 +92,25 @@ export function readSession(token: string | undefined): SessionUser | null {
   return verifyValue<SessionUser & { exp: number }>(token);
 }
 
-// A user is allowed in if ALLOWED_USERS is empty, or their sub/email is listed.
-export function isAllowed(user: SessionUser): boolean {
-  if (config.allowedUsers.length === 0) return true;
-  return (
-    config.allowedUsers.includes(user.sub) ||
-    (user.email != null && config.allowedUsers.includes(user.email))
-  );
+// Re-anchor a session cookie on the user directory.
+//
+// The cookie is signed and stateless, so on its own it stays good for its whole
+// 30-day life: an account deleted from the directory would keep its access
+// until the cookie aged out. Reading the row back on every request makes the
+// removal take effect immediately, and picks up a renamed display name or a new
+// avatar for free. Returns null when the session no longer names anyone.
+export function currentUser(session: SessionUser): SessionUser | null {
+  const row = findUserBySub(session.sub);
+  if (!row) return null;
+
+  return {
+    sub: row.sub,
+    email: session.email,
+    name: row.name,
+    username: row.username,
+    slug: row.slug,
+    picture: row.picture,
+  };
 }
 
 // ---- git token auth ---------------------------------------------------------
@@ -112,24 +126,12 @@ export function parseBasicAuth(
   return [decoded.slice(0, idx), decoded.slice(idx + 1)];
 }
 
-function isStaticToken(token: string): boolean {
-  const candidate = Buffer.from(token);
-  for (const known of config.gitTokens) {
-    const target = Buffer.from(known);
-    if (
-      candidate.length === target.length &&
-      timingSafeEqual(candidate, target)
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // What a set of Basic credentials is allowed to be.
+//
+// There is deliberately no instance-wide credential. Every token belongs to
+// exactly one account, so every push and every private read is attributable and
+// bounded by that account's permissions.
 export type GitAuth =
-  // A token from MINIGIT_GIT_TOKENS: instance-wide, not tied to an account.
-  | { kind: "instance" }
   // A token minted at /tokens, acting as exactly one owner namespace.
   | { kind: "user"; owner: string }
   // No credentials at all — the caller should send a Basic challenge.
@@ -149,8 +151,6 @@ export function authenticateGit(header: string | undefined): GitAuth {
 
   const [username, token] = basic;
   if (!token) return { kind: "anonymous" };
-
-  if (isStaticToken(token)) return { kind: "instance" };
 
   const row = verifyDbToken(token);
   if (!row) return { kind: "rejected", message: "invalid or revoked token" };
@@ -181,10 +181,10 @@ export function authenticateGit(header: string | undefined): GitAuth {
   return { kind: "user", owner: row.owner };
 }
 
-// True if this identity may write to (and auto-create) repos under `owner`.
-export function canPushTo(auth: GitAuth, owner: string): boolean {
-  if (auth.kind === "instance") return true;
-  return auth.kind === "user" && auth.owner === owner;
+// The owner slug a set of credentials acts as, or null when they don't act as
+// anybody. Repo-level authority lives in access.ts — this only says who.
+export function gitActor(auth: GitAuth): string | null {
+  return auth.kind === "user" ? auth.owner : null;
 }
 
 // ---- OIDC (PocketID) --------------------------------------------------------
@@ -290,20 +290,13 @@ export async function finishLogin(
         : null,
     picture: typeof claims.picture === "string" ? claims.picture : null,
   };
-  const user: SessionUser = { ...claimed, slug: "" };
-  if (!isAllowed(user)) {
-    console.error(
-      `[auth] login denied by ALLOWED_USERS. Authenticated as ` +
-        `sub=${user.sub} email=${user.email ?? "(none)"}. ` +
-        `Add one of those to ALLOWED_USERS (or leave it blank to allow any login).`,
-    );
-    return null;
-  }
 
-  // Only now, past the allow-list, does the account earn a directory entry and
-  // with it a permanent owner slug.
+  // Anyone PocketID vouches for is welcome: PocketID is the guest list, and
+  // keeping a second one here only ever gets out of step with it. Signing in
+  // earns a directory entry and with it a permanent owner slug — which is a
+  // namespace of their own, not access to anybody else's.
   const row = rememberUser(claimed);
-  return { ...user, slug: row.slug };
+  return { ...claimed, slug: row.slug };
 }
 
 export { oidcEnabled };

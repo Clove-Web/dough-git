@@ -1,4 +1,6 @@
-/* Component classes. Each is a generated, scoped class name (zero runtime).
+/* src/styles/app.css.ts
+ *
+ * Component classes. Each is a generated, scoped class name (zero runtime).
  * Imported as a single `classes` object by the HTML views.
  */
 
@@ -239,6 +241,44 @@ export const classes = {
   binaryNotice: style({ color: vars.textMuted }),
 
   message: style({ color: vars.textMuted }),
+
+  // Small inline marker: "shared", "write", "read". Carries meaning, so the
+  // text inside it always says the thing rather than relying on colour.
+  badge: style({
+    display: "inline-block",
+    padding: "0.05rem 0.4rem",
+    marginLeft: "0.4rem",
+    borderRadius: "999px",
+    border: `1px solid ${vars.border}`,
+    background: vars.surfaceHi,
+    fontFamily: vars.mono,
+    fontSize: "0.75em",
+    color: vars.textMuted,
+    verticalAlign: "middle",
+  }),
+
+  // A form whose controls sit on one line and wrap together on narrow screens.
+  formRow: style({
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: "0.5rem",
+  }),
+
+  // The one control in a formRow that should soak up the leftover width.
+  grow: style({
+    flex: "1 1 12rem",
+    minWidth: 0,
+  }),
+
+  // Branch / tag selector. Sits between the tabs and the content it governs.
+  revPicker: style({
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: "0.5rem",
+    margin: "0.75rem 0",
+  }),
 
   empty: style({ color: vars.textDim }),
 

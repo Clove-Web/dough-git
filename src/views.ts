@@ -1,3 +1,5 @@
+/* src/views.ts */
+//
 // HTML rendering. Class names come from the compiled Vanilla Extract styles
 // (src/styles). Repos are addressed GitHub-style as owner/name throughout.
 
@@ -6,6 +8,7 @@ import { classes as c } from "./styles/index.ts";
 import { escapeHtml, renderMarkdown, plainSummary } from "./markdown.ts";
 import { sessionSlug } from "./auth.ts";
 import type { SessionUser } from "./auth.ts";
+import type { CollaboratorRow } from "./access.ts";
 import type { TokenRow } from "./tokens.ts";
 import type { UserRow } from "./users.ts";
 import type {
@@ -14,6 +17,7 @@ import type {
   TreeEntry,
   CommitDetail,
   Readme,
+  RefList,
 } from "./git.ts";
 
 export const esc = escapeHtml;
@@ -30,6 +34,52 @@ function base(owner: string, name: string): string {
 
 function cloneUrl(owner: string, name: string): string {
   return `${config.baseUrl}/${owner}/${name}.git`;
+}
+
+// ---- revisions --------------------------------------------------------------
+
+// The `?h=` a link needs to stay on the current revision. The default branch
+// carries no query, so ordinary URLs stay clean and shareable.
+//
+// A branch name may contain characters that are structural in a URL (`/` in
+// `feature/thing`, `#`, `?`), so it is always percent-encoded — which also
+// makes it safe to drop straight into an HTML attribute.
+function revQuery(rev: string, head: string): string {
+  return rev === head ? "" : `?h=${encodeURIComponent(rev)}`;
+}
+
+// A picker for the branch or tag being viewed. It is a plain GET form, so it
+// works with scripting off; /static/app.js only removes the extra click.
+function revPicker(refs: RefList, rev: string): string {
+  const all = [...refs.branches, ...refs.tags];
+  // Nothing to switch between, or a detached commit id that isn't in the list.
+  if (all.length < 2 && all.includes(rev)) return "";
+  if (all.length === 0) return "";
+
+  const options = (names: string[], label: string): string => {
+    if (names.length === 0) return "";
+    const items = names
+      .map(
+        (name) =>
+          `<option value="${esc(name)}"${name === rev ? " selected" : ""}>${esc(name)}</option>`,
+      )
+      .join("");
+    return `<optgroup label="${label}">${items}</optgroup>`;
+  };
+
+  // A revision reached by object id isn't in either list; show it so the
+  // control never displays something other than what is on screen.
+  const detached = all.includes(rev)
+    ? ""
+    : `<option value="${esc(rev)}" selected>${esc(rev.slice(0, 10))}</option>`;
+
+  return `<form method="get" class="${c.revPicker}">
+      <label class="${c.cloneLabel}" for="rev-picker">revision</label>
+      <select id="rev-picker" name="h" data-autosubmit>
+        ${detached}${options(refs.branches, "branches")}${options(refs.tags, "tags")}
+      </select>
+      <button type="submit">go</button>
+    </form>`;
 }
 
 // Collapse a description to one clean line of attribute-safe text.
@@ -54,11 +104,15 @@ export function displayName(p: Profile & { sub?: string }): string {
 // Avatar from PocketID's `picture` claim, over a first-initial fallback. The
 // IDP may serve avatars only to signed-in browsers, so a failed image drops
 // itself and uncovers the initial rather than leaving a broken-image box.
+//
+// The drop is done by /static/app.js rather than an inline onerror handler,
+// because the Content-Security-Policy forbids inline script — that policy is
+// what stands behind markdown.ts if the renderer ever lets something through.
 function avatar(p: Profile, size: number): string {
   const initial = esc(displayName(p).trim().slice(0, 1).toUpperCase() || "?");
   const box = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.5)}px`;
   const img = p.picture
-    ? `<img class="${c.avatarImg}" src="${esc(p.picture)}" alt="" loading="lazy" onerror="this.remove()">`
+    ? `<img class="${c.avatarImg}" src="${esc(p.picture)}" alt="" loading="lazy" data-avatar>`
     : "";
   return `<span class="${c.avatar}" style="${box}">${initial}${img}</span>`;
 }
@@ -115,6 +169,7 @@ function layout(opts: {
   <link rel="icon" href="${icon}">
   <link rel="apple-touch-icon" href="${icon}">
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
 </head>
 <body>
   <header class="${c.siteHeader}">
@@ -134,17 +189,28 @@ ${opts.body}
 
 // The repo table shared by the front page and the profile pages. `showOwner`
 // is off on a profile, where every row has the same owner as the heading.
+//
+// `sharedSlugs` holds the `owner/name` of repos this viewer only sees because
+// somebody invited them. Marking those is the difference between "my repos" and
+// "repos I can reach", which is otherwise invisible.
 function repoTable(
   repos: RepoSummary[],
-  opts: { showOwner: boolean; empty: string },
+  opts: {
+    showOwner: boolean;
+    empty: string;
+    sharedSlugs?: Set<string> | null;
+  },
 ): string {
   const rows = repos
     .map((r) => {
       const owner = opts.showOwner
         ? `<a class="${c.ownerLink}" href="/${esc(r.owner)}">${esc(r.owner)}</a>/`
         : "";
+      const shared = opts.sharedSlugs?.has(`${r.owner}/${r.name}`)
+        ? `<span class="${c.badge}">shared</span>`
+        : "";
       return `      <tr class="${c.repoRow}">
-        <td class="${c.repoName}">${owner}<a href="${base(r.owner, r.name)}/">${esc(r.name)}</a></td>
+        <td class="${c.repoName}">${owner}<a href="${base(r.owner, r.name)}/">${esc(r.name)}</a>${shared}</td>
         <td class="${c.repoDesc}">${esc(r.description)}</td>
         <td class="${c.repoVis}">${r.isPublic ? "public" : "private"}</td>
         <td class="${c.repoIdle}">${fmtDate(r.lastCommit)}</td>
@@ -165,9 +231,10 @@ ${rows || `        <tr><td colspan="4" class="${c.empty}">${esc(opts.empty)}</td
 export function repoListPage(
   repos: RepoSummary[],
   user: SessionUser | null,
+  opts: { sharedSlugs?: Set<string> | null } = {},
 ): string {
   const createForm = user
-    ? `    <form method="post" action="/new" class="${c.cloneBox}">
+    ? `    <form method="post" action="/new" class="${c.cloneBox} ${c.formRow}">
       <label class="${c.cloneLabel}">new repo</label>
       <span class="${c.repoVis}">${esc(ownerOf(user))}/</span>
       <input type="text" name="name" placeholder="my-project" pattern="[A-Za-z0-9._-]+" required>
@@ -177,7 +244,11 @@ export function repoListPage(
 
   const body = `    <h1 class="${c.pageTitle}">repositories</h1>
 ${createForm}
-    ${repoTable(repos, { showOwner: true, empty: "no repositories visible" })}`;
+    ${repoTable(repos, {
+      showOwner: true,
+      empty: "no repositories visible",
+      sharedSlugs: opts.sharedSlugs,
+    })}`;
   return layout({ title: config.title, user, body, path: "/" });
 }
 
@@ -229,24 +300,36 @@ export function ownerOf(user: SessionUser): string {
   return sessionSlug(user);
 }
 
-function repoNav(owner: string, name: string, active: string): string {
+// The three repo tabs. `q` is the `?h=` suffix, so switching tabs keeps you on
+// the branch you were reading.
+function repoNav(
+  owner: string,
+  name: string,
+  active: string,
+  q: string,
+): string {
   const b = base(owner, name);
   const tab = (id: string, label: string, href: string) =>
     `<a class="${c.tab}${id === active ? " " + c.tabActive : ""}" href="${href}">${label}</a>`;
   return `    <nav class="${c.repoTabs}">
-      ${tab("summary", "summary", `${b}/`)}
-      ${tab("log", "log", `${b}/log`)}
-      ${tab("tree", "tree", `${b}/tree`)}
+      ${tab("summary", "summary", `${b}/${q}`)}
+      ${tab("log", "log", `${b}/log${q}`)}
+      ${tab("tree", "tree", `${b}/tree${q}`)}
     </nav>`;
 }
 
-function commitTable(owner: string, name: string, commits: Commit[]): string {
+function commitTable(
+  owner: string,
+  name: string,
+  commits: Commit[],
+  q: string,
+): string {
   const b = base(owner, name);
   const rows = commits
     .map(
       (cm) => `      <tr>
         <td class="${c.commitDate}">${fmtDate(cm.time)}</td>
-        <td class="${c.commitSubject}"><a href="${b}/commit/${esc(cm.hash)}">${esc(cm.subject)}</a></td>
+        <td class="${c.commitSubject}"><a href="${b}/commit/${esc(cm.hash)}${q}">${esc(cm.subject)}</a></td>
         <td class="${c.commitAuthor}">${esc(cm.author)}</td>
         <td class="${c.commitHash}">${esc(cm.hash.slice(0, 10))}</td>
       </tr>`,
@@ -266,17 +349,35 @@ export function summaryPage(opts: {
   empty: boolean;
   readme: Readme | null;
   description: string;
+  // The `description` file as stored, for the edit form. "" means unset.
+  rawDescription: string;
+  // True when the viewer may push: the owner, or a write collaborator.
+  canPush: boolean;
+  // The grant list, but only when the viewer is the owner — nobody else is
+  // shown who else has access.
+  collaborators: CollaboratorRow[] | null;
+  refs: RefList;
+  rev: string;
   user: SessionUser | null;
 }): string {
   const title = `${opts.owner}/${opts.name}`;
   const empty = opts.empty;
-  const pushHint = empty
-    ? `    <section class="${c.cloneBox}">
+  const q = revQuery(opts.rev, opts.refs.head);
+  // Whoever is pushing authenticates as themselves, not as the repo's owner, so
+  // the username in the hint is the reader's own slug.
+  const pusher = opts.user ? ownerOf(opts.user) : opts.owner;
+  const pushHint =
+    empty && opts.canPush
+      ? `    <section class="${c.cloneBox}">
       <p><strong>This repository is empty.</strong> Push to get started:</p>
       <code>git remote add mirror ${esc(cloneUrl(opts.owner, opts.name))}<br>git push --mirror mirror</code>
-      <p class="${c.repoDesc}">When prompted, the <strong>username</strong> is <code>${esc(opts.owner)}</code> and the <strong>password</strong> is a token from <a href="/tokens">/tokens</a>.</p>
+      <p class="${c.repoDesc}">When prompted, the <strong>username</strong> is <code>${esc(pusher)}</code> and the <strong>password</strong> is a token from <a href="/tokens">/tokens</a>.</p>
     </section>`
-    : "";
+      : empty
+        ? `    <section class="${c.cloneBox}">
+      <p class="${c.empty}">This repository is empty.</p>
+    </section>`
+        : "";
 
   // An empty repo has nothing to look for, so it only gets the push hint above.
   const readmeSection = empty
@@ -290,22 +391,41 @@ ${renderMarkdown(opts.readme.text)}
     <p class="${c.empty}">No ReadMe was found, commit one to add a summary</p>`;
 
   // Only the owner manages a repo — matching what the git transport enforces.
-  const manage = opts.user && ownerOf(opts.user) === opts.owner
+  // A write collaborator can push, but can't publish the repo, delete it, or
+  // hand access to anybody else.
+  const isOwner = opts.collaborators !== null;
+  const manage = isOwner
     ? `    <h2 class="${c.sectionTitle}">manage</h2>
     <div class="${c.repoTabs}">
       <form method="post" action="${base(opts.owner, opts.name)}/visibility">
         <input type="hidden" name="public" value="${opts.isPublic ? "" : "on"}">
         <button type="submit">make ${opts.isPublic ? "private" : "public"}</button>
       </form>
-      <form method="post" action="${base(opts.owner, opts.name)}/delete" onsubmit="return confirm('Delete ${esc(title)} permanently? This cannot be undone.');">
+      <form method="post" action="${base(opts.owner, opts.name)}/delete" data-confirm="Delete ${esc(title)} permanently? This cannot be undone.">
         <button type="submit">delete repository</button>
       </form>
-    </div>`
+    </div>
+${collaboratorSection(opts.owner, opts.name, opts.collaborators ?? [])}`
     : "";
 
+  // Editing the blurb needs push rights, not ownership: it is the same thing a
+  // collaborator could already change by committing a README.
+  const descriptionForm = opts.canPush
+    ? `    <form method="post" action="${base(opts.owner, opts.name)}/description" class="${c.cloneBox} ${c.formRow}">
+      <label class="${c.cloneLabel}" for="repo-description">description</label>
+      <input id="repo-description" class="${c.grow}" type="text" name="description" maxlength="300"
+        value="${esc(opts.rawDescription)}" placeholder="what this repository is for">
+      <button type="submit">save</button>
+    </form>`
+    : opts.rawDescription
+      ? `    <p class="${c.repoDesc}">${esc(opts.rawDescription)}</p>`
+      : "";
+
   const body = `    <h1 class="${c.pageTitle}"><a class="${c.ownerLink}" href="/${esc(opts.owner)}">${esc(opts.owner)}</a>/${esc(opts.name)}</h1>
-    <p class="${c.repoDesc}">${opts.isPublic ? "public" : "private"}</p>
-${repoNav(opts.owner, opts.name, "summary")}
+    <p class="${c.repoDesc}">${opts.isPublic ? "public" : "private"}${opts.canPush && !isOwner ? `<span class="${c.badge}">you can push</span>` : ""}</p>
+${repoNav(opts.owner, opts.name, "summary", q)}
+${descriptionForm}
+    ${revPicker(opts.refs, opts.rev)}
     <section class="${c.cloneBox}">
       <span class="${c.cloneLabel}">clone</span>
       <code>git clone ${esc(cloneUrl(opts.owner, opts.name))}</code>
@@ -321,6 +441,53 @@ ${manage}`;
     path: `/${opts.owner}/${opts.name}`,
     noindex: !opts.isPublic,
   });
+}
+
+// The owner's view of who else can reach this repo. Read access is what makes a
+// private repo visible at all; write access additionally allows a push.
+function collaboratorSection(
+  owner: string,
+  name: string,
+  collaborators: CollaboratorRow[],
+): string {
+  const action = `${base(owner, name)}/collaborators`;
+
+  const rows = collaborators
+    .map(
+      (person) => `      <tr>
+        <td><a href="/${esc(person.slug)}">${esc(person.slug)}</a></td>
+        <td class="${c.repoVis}">${esc(person.level)}</td>
+        <td class="${c.commitDate}">${fmtDate(person.added_at)}</td>
+        <td>
+          <form method="post" action="${action}/remove">
+            <input type="hidden" name="slug" value="${esc(person.slug)}">
+            <button type="submit">remove</button>
+          </form>
+        </td>
+      </tr>`,
+    )
+    .join("\n");
+
+  return `    <h2 class="${c.sectionTitle}">collaborators</h2>
+    <p class="${c.repoDesc}">People here can see this repository even while it is
+    private. <code>write</code> also lets them push to it.</p>
+    <form method="post" action="${action}" class="${c.cloneBox} ${c.formRow}">
+      <label class="${c.cloneLabel}" for="collab-slug">username</label>
+      <input id="collab-slug" type="text" name="slug" placeholder="their handle" pattern="[A-Za-z0-9._-]+" required>
+      <select name="level" aria-label="access level">
+        <option value="read">read</option>
+        <option value="write">write</option>
+      </select>
+      <button type="submit">add</button>
+    </form>
+    <table>
+      <thead>
+        <tr><th>user</th><th>access</th><th>added</th><th></th></tr>
+      </thead>
+      <tbody>
+${rows || `        <tr><td colspan="4" class="${c.empty}">nobody else has access</td></tr>`}
+      </tbody>
+    </table>`;
 }
 
 // Best available one-line description of a repo: git's own `description` file,
@@ -341,17 +508,21 @@ export function logPage(opts: {
   owner: string;
   name: string;
   commits: Commit[];
+  refs: RefList;
+  rev: string;
   user: SessionUser | null;
 }): string {
   const title = `${opts.owner}/${opts.name}`;
+  const q = revQuery(opts.rev, opts.refs.head);
   const body = `    <h1 class="${c.pageTitle}">${esc(title)} &middot; log</h1>
-${repoNav(opts.owner, opts.name, "log")}
-    ${commitTable(opts.owner, opts.name, opts.commits)}`;
+${repoNav(opts.owner, opts.name, "log", q)}
+    ${revPicker(opts.refs, opts.rev)}
+    ${commitTable(opts.owner, opts.name, opts.commits, q)}`;
   return layout({
     title: `${title} log`,
     user: opts.user,
     body,
-    description: `Commit history for ${title}.`,
+    description: `Commit history for ${title} on ${opts.rev}.`,
     path: `/${opts.owner}/${opts.name}/log`,
   });
 }
@@ -361,15 +532,31 @@ export function treePage(opts: {
   name: string;
   path: string;
   entries: TreeEntry[];
+  refs: RefList;
+  rev: string;
   user: SessionUser | null;
 }): string {
   const b = base(opts.owner, opts.name);
+  const q = revQuery(opts.rev, opts.refs.head);
   const crumb = opts.path ? ` /${esc(opts.path)}` : "";
+
+  // A link back up one level, so a deep tree isn't a dead end without the
+  // browser's back button.
+  const parent = opts.path
+    ? `      <tr class="${c.repoRow}">
+        <td class="${c.treeMode}"></td>
+        <td class="${c.treeName}"><a href="${b}/tree/${esc(opts.path.split("/").slice(0, -1).join("/"))}${q}">../</a></td>
+        <td class="${c.treeSize}"></td>
+      </tr>`
+    : "";
+
   const rows = opts.entries
     .map((e) => {
       const childPath = opts.path ? `${opts.path}/${e.name}` : e.name;
       const href =
-        e.type === "tree" ? `${b}/tree/${esc(childPath)}` : `${b}/blob/${esc(childPath)}`;
+        e.type === "tree"
+          ? `${b}/tree/${esc(childPath)}${q}`
+          : `${b}/blob/${esc(childPath)}${q}`;
       return `      <tr class="${c.repoRow}">
         <td class="${c.treeMode}">${esc(e.mode)}</td>
         <td class="${c.treeName}"><a href="${href}">${esc(e.name)}${e.type === "tree" ? "/" : ""}</a></td>
@@ -379,10 +566,11 @@ export function treePage(opts: {
     .join("\n");
 
   const body = `    <h1 class="${c.pageTitle}">${esc(opts.owner)}/${esc(opts.name)} &middot; tree${crumb}</h1>
-${repoNav(opts.owner, opts.name, "tree")}
+${repoNav(opts.owner, opts.name, "tree", q)}
+    ${revPicker(opts.refs, opts.rev)}
     <table class="${c.treeList}">
       <tbody>
-${rows || `        <tr><td class="${c.empty}">empty</td></tr>`}
+${[parent, rows].filter(Boolean).join("\n") || `        <tr><td class="${c.empty}">empty</td></tr>`}
       </tbody>
     </table>`;
   return layout({
@@ -394,19 +582,36 @@ ${rows || `        <tr><td class="${c.empty}">empty</td></tr>`}
   });
 }
 
+// Bytes as something a person can read at a glance.
+function fmtBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function blobPage(opts: {
   owner: string;
   name: string;
   path: string;
   binary: boolean;
   text: string;
+  truncated: boolean;
+  bytes: number;
+  refs: RefList;
+  rev: string;
   user: SessionUser | null;
 }): string {
+  const cut = opts.truncated
+    ? `<p class="${c.binaryNotice}">Showing the first part of a ${esc(fmtBytes(opts.bytes))} file. Clone the repository to read all of it.</p>`
+    : "";
   const content = opts.binary
-    ? `<p class="${c.binaryNotice}">binary file not shown</p>`
-    : `<pre class="${c.code}"><code>${esc(opts.text)}</code></pre>`;
+    ? `<p class="${c.binaryNotice}">binary file not shown (${esc(fmtBytes(opts.bytes))})</p>`
+    : `${cut}<pre class="${c.code}"><code>${esc(opts.text)}</code></pre>`;
+  const q = revQuery(opts.rev, opts.refs.head);
+  const upPath = opts.path.split("/").slice(0, -1).join("/");
   const body = `    <h1 class="${c.pageTitle}">${esc(opts.owner)}/${esc(opts.name)} &middot; ${esc(opts.path)}</h1>
-${repoNav(opts.owner, opts.name, "tree")}
+${repoNav(opts.owner, opts.name, "tree", q)}
+    <p class="${c.repoDesc}"><a href="${base(opts.owner, opts.name)}/tree/${esc(upPath)}${q}">&larr; back to ${esc(upPath || "tree")}</a></p>
     ${content}`;
   return layout({
     title: opts.path,
@@ -421,17 +626,22 @@ export function commitPage(opts: {
   owner: string;
   name: string;
   commit: CommitDetail;
+  rev: string;
   user: SessionUser | null;
 }): string {
   const cm = opts.commit;
+  // A commit is reached from some branch; carrying that along keeps the tabs
+  // pointing back where the reader came from.
+  const q = `?h=${encodeURIComponent(opts.rev)}`;
   const body = `    <h1 class="${c.pageTitle}">${esc(cm.subject)}</h1>
-${repoNav(opts.owner, opts.name, "log")}
+${repoNav(opts.owner, opts.name, "log", q)}
     <dl class="${c.commitMeta}">
       <dt>commit</dt><dd class="${c.commitHash}">${esc(cm.hash)}</dd>
       <dt>author</dt><dd>${esc(cm.author)} &lt;${esc(cm.email)}&gt;</dd>
       <dt>date</dt><dd>${fmtDate(cm.time)}</dd>
     </dl>
     ${cm.body ? `<pre class="${c.code}">${esc(cm.body)}</pre>` : ""}
+    ${cm.diffTruncated ? `<p class="${c.binaryNotice}">This diff is too large to show in full. Clone the repository to read all of it.</p>` : ""}
     <pre class="${c.code}"><code>${esc(cm.diff)}</code></pre>`;
   return layout({
     title: cm.subject,

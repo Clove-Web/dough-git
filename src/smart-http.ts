@@ -1,3 +1,5 @@
+/* src/smart-http.ts */
+//
 // Git "smart HTTP" transport.
 //
 // This implements the two request shapes a git client makes when cloning,

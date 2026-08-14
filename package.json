@@ -9,7 +9,7 @@
     "start": "node --experimental-sqlite --disable-warning=ExperimentalWarning dist/server.js",
     "dev": "npm run build && npm start",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types test/transport.test.mjs && node --experimental-strip-types test/markdown.test.mjs && node --experimental-sqlite --disable-warning=ExperimentalWarning --experimental-strip-types test/ownership.test.mjs"
+    "test": "node --experimental-strip-types test/transport.test.mjs && node --experimental-strip-types test/markdown.test.mjs && node --experimental-sqlite --disable-warning=ExperimentalWarning --experimental-strip-types test/ownership.test.mjs && node --experimental-sqlite --disable-warning=ExperimentalWarning --experimental-strip-types test/access.test.mjs && node --experimental-strip-types test/refs.test.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

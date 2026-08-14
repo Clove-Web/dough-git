@@ -1,3 +1,5 @@
+/* src/users.ts */
+//
 // The user directory: everyone who has ever signed in via PocketID.
 //
 // This exists for two reasons. Repos are namespaced by an owner *slug*, so the

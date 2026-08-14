@@ -1,4 +1,6 @@
-// The one SQLite handle, shared by the tokens and users tables.
+/* src/db.ts */
+//
+// The one SQLite handle, shared by the users, tokens and collaborators tables.
 //
 // Uses Node's built-in `node:sqlite` (run with --experimental-sqlite), so there
 // is no native module to compile. Both tables are small and only ever touched

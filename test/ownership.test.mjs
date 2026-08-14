@@ -1,8 +1,11 @@
-// Tests for per-user token ownership: who a token acts as, and what it may
-// push to. This is the rule that keeps one account out of another's namespace,
-// so it's worth pinning down directly rather than only through the transport.
-//
-// Run:  node --experimental-sqlite --experimental-strip-types test/ownership.test.mjs
+/* test/ownership.test.mjs
+ *
+ * Tests for per-user token ownership: who a token acts as. This is the rule
+ * that keeps one account out of another's namespace, so it's worth pinning down
+ * directly rather than only through the transport.
+ *
+ * Run:  node --experimental-sqlite --experimental-strip-types test/ownership.test.mjs
+ */
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,11 +15,10 @@ import { join } from "node:path";
 const root = mkdtempSync(join(tmpdir(), "dough-own-"));
 process.env.MINIGIT_REPOS_ROOT = root;
 process.env.MINIGIT_DB_PATH = join(root, "test.db");
-process.env.MINIGIT_GIT_TOKENS = "static-instance-token";
 
 const { rememberUser } = await import("../src/users.ts");
 const { createToken, revokeToken, listTokens } = await import("../src/tokens.ts");
-const { authenticateGit, canPushTo } = await import("../src/auth.ts");
+const { authenticateGit, gitActor } = await import("../src/auth.ts");
 
 let failures = 0;
 function check(label, cond) {
@@ -36,6 +38,7 @@ const alex = rememberUser({
   name: "Alex Kim",
   picture: null,
 });
+
 const sam = rememberUser({
   sub: "oidc-sam",
   username: "sam",
@@ -53,6 +56,7 @@ const impostor = rememberUser({
   name: "Not Alex",
   picture: null,
 });
+
 check("colliding usernames get distinct slugs", impostor.slug === "alex.kim-2");
 
 const alexToken = createToken("laptop", alex.slug, alex.sub);
@@ -71,7 +75,10 @@ check(
 );
 
 const asAlex = authenticateGit(basic("alex.kim", alexToken));
-check("a token resolves to its owner", asAlex.kind === "user" && asAlex.owner === "alex.kim");
+check(
+  "a token resolves to its owner",
+  asAlex.kind === "user" && asAlex.owner === "alex.kim",
+);
 
 const asAlexRaw = authenticateGit(basic("Alex.Kim", alexToken));
 check(
@@ -89,24 +96,21 @@ check(
   authenticateGit(basic("", alexToken)).kind === "rejected",
 );
 
+// The instance-wide token is gone: no credential acts as anything but one
+// account, so a would-be static token is simply not a token.
 check(
-  "a static token is instance-wide",
-  authenticateGit(basic("anything", "static-instance-token")).kind === "instance",
+  "there is no instance-wide credential any more",
+  authenticateGit(basic("anything", "static-instance-token")).kind === "rejected",
 );
 
-// ---- push authority ---------------------------------------------------------
+// ---- actor ------------------------------------------------------------------
 
-check("owner may push to their own namespace", canPushTo(asAlex, "alex.kim"));
-check("owner may not push to another's", !canPushTo(asAlex, "sam"));
+check("a user token acts as its owner", gitActor(asAlex) === "alex.kim");
+check("anonymous acts as nobody", gitActor({ kind: "anonymous" }) === null);
 check(
-  "the colliding account may not push to the original's",
-  !canPushTo(authenticateGit(basic("alex.kim-2", createToken("t", impostor.slug, impostor.sub))), "alex.kim"),
+  "rejected credentials act as nobody",
+  gitActor({ kind: "rejected", message: "no" }) === null,
 );
-check(
-  "a static token may push anywhere",
-  canPushTo({ kind: "instance" }, "alex.kim") && canPushTo({ kind: "instance" }, "sam"),
-);
-check("anonymous may not push", !canPushTo({ kind: "anonymous" }, "alex.kim"));
 
 // ---- token listing is per-owner ---------------------------------------------
 
