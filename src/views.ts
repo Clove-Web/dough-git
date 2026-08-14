@@ -130,7 +130,7 @@ function layout(opts: {
 }): string {
   // Three zones: home on the left, who you are in the middle, settings right.
   const whoami = opts.user
-    ? `<a class="${c.user}" href="/${esc(ownerOf(opts.user))}">${avatar(opts.user, 22)}${esc(displayName(opts.user))}</a>`
+    ? `<a class="${c.user}" href="/${esc(ownerOf(opts.user))}">${avatar(opts.user, 28)}${esc(displayName(opts.user))}</a>`
     : "";
   const settings = opts.user
     ? `<a class="${c.navLink}" href="/tokens">tokens</a>
@@ -273,7 +273,7 @@ export function profilePage(opts: {
     : `<p class="${c.repoDesc}">@${esc(opts.owner)} &middot; no account on this instance</p>`;
 
   const body = `    <section class="${c.profileHead}">
-      ${avatar(p ?? { name: opts.owner, username: null, picture: null }, 64)}
+      ${avatar(p ?? { name: opts.owner, username: null, picture: null }, 112)}
       <div>
         <h1 class="${c.profileName}">${esc(name)}</h1>
         ${known}
