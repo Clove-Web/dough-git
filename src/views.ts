@@ -108,13 +108,17 @@ export function displayName(p: Profile & { sub?: string }): string {
 // The drop is done by /static/app.js rather than an inline onerror handler,
 // because the Content-Security-Policy forbids inline script — that policy is
 // what stands behind markdown.ts if the renderer ever lets something through.
-function avatar(p: Profile, size: number): string {
+//
+// The size comes from a class, not an inline `style` attribute: the CSP's
+// `style-src 'self'` drops inline styles too, which silently collapsed the
+// circle to the width of the fallback letter.
+function avatar(p: Profile, size: "sm" | "lg"): string {
   const initial = esc(displayName(p).trim().slice(0, 1).toUpperCase() || "?");
-  const box = `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.5)}px`;
+  const box = size === "lg" ? c.avatarLg : c.avatarSm;
   const img = p.picture
     ? `<img class="${c.avatarImg}" src="${esc(p.picture)}" alt="" loading="lazy" data-avatar>`
     : "";
-  return `<span class="${c.avatar}" style="${box}">${initial}${img}</span>`;
+  return `<span class="${c.avatar} ${box}">${initial}${img}</span>`;
 }
 
 function layout(opts: {
@@ -130,7 +134,7 @@ function layout(opts: {
 }): string {
   // Three zones: home on the left, who you are in the middle, settings right.
   const whoami = opts.user
-    ? `<a class="${c.user}" href="/${esc(ownerOf(opts.user))}">${avatar(opts.user, 28)}${esc(displayName(opts.user))}</a>`
+    ? `<a class="${c.user}" href="/${esc(ownerOf(opts.user))}">${avatar(opts.user, "sm")}${esc(displayName(opts.user))}</a>`
     : "";
   const settings = opts.user
     ? `<a class="${c.navLink}" href="/tokens">tokens</a>
@@ -273,7 +277,7 @@ export function profilePage(opts: {
     : `<p class="${c.repoDesc}">@${esc(opts.owner)} &middot; no account on this instance</p>`;
 
   const body = `    <section class="${c.profileHead}">
-      ${avatar(p ?? { name: opts.owner, username: null, picture: null }, 112)}
+      ${avatar(p ?? { name: opts.owner, username: null, picture: null }, "lg")}
       <div>
         <h1 class="${c.profileName}">${esc(name)}</h1>
         ${known}

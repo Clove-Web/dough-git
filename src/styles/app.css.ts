@@ -77,7 +77,8 @@ export const classes = {
   }),
 
   // Circle holding a first initial, with the IDP's avatar layered on top when
-  // it loads. Sized inline by the caller.
+  // it loads. Sizing lives in the avatarSm/avatarLg modifiers below rather than
+  // an inline style attribute, because `style-src 'self'` drops inline styles.
   avatar: style({
     position: "relative",
     flexShrink: 0,
@@ -91,6 +92,29 @@ export const classes = {
     lineHeight: 1,
     overflow: "hidden",
     userSelect: "none",
+  }),
+
+  // Header avatar. min/max pin the box so the flex row can neither squeeze nor
+  // stretch it around a long display name.
+  avatarSm: style({
+    width: "32px",
+    minWidth: "32px",
+    maxWidth: "32px",
+    height: "32px",
+    minHeight: "32px",
+    maxHeight: "32px",
+    fontSize: "16px",
+  }),
+
+  // Profile-page avatar, pinned to 60x60.
+  avatarLg: style({
+    width: "60px",
+    minWidth: "60px",
+    maxWidth: "60px",
+    height: "60px",
+    minHeight: "60px",
+    maxHeight: "60px",
+    fontSize: "30px",
   }),
 
   avatarImg: style({
