@@ -12,6 +12,10 @@ RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
 COPY scripts ./scripts
+# Hand-written static assets (app.js). The build writes the generated
+# style.css into this same directory — .dockerignore keeps the local copy of
+# that one out, so the image always gets a freshly compiled stylesheet.
+COPY public ./public
 RUN npm run build
 
 # --- runtime stage -----------------------------------------------------------
