@@ -96,9 +96,19 @@ check(
 );
 check("table head", has("| a | b |\n| - | - |\n| 1 | 2 |", "<th>a</th>"));
 check("table body", has("| a | b |\n| - | - |\n| 1 | 2 |", "<td>1</td>"));
+// Alignment is a data attribute, not an inline style — the CSP blocks style
+// attributes, so an inline text-align never reached the page.
 check(
-  "table alignment",
-  has("| a |\n| :-: |\n| 1 |", 'style="text-align:center"'),
+  "table alignment centres",
+  has("| a |\n| :-: |\n| 1 |", 'data-align="center"'),
+);
+check(
+  "table alignment right-aligns",
+  has("| a |\n| --: |\n| 1 |", 'data-align="right"'),
+);
+check(
+  "table alignment never emits an inline style",
+  lacks("| a |\n| :-: |\n| 1 |", "style="),
 );
 check(
   "raw HTML block lines are dropped, not printed as source",

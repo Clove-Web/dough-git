@@ -207,11 +207,16 @@ function splitRow(line: string): string[] {
     .map((cell) => cell.trim().replace(/\\\|/g, "|"));
 }
 
+// A column's alignment travels as a data attribute, not an inline style: the
+// Content-Security-Policy's `style-src 'self'` blocks style attributes, so an
+// inline text-align was silently discarded and every column rendered left.
+// The matching rules live beside the other README table styles in app.css.ts.
+// Left needs no marker — the base `th, td` rule already aligns left.
 function alignOf(cell: string): string {
   const left = cell.startsWith(":");
   const right = cell.endsWith(":");
-  if (left && right) return ` style="text-align:center"`;
-  if (right) return ` style="text-align:right"`;
+  if (left && right) return ` data-align="center"`;
+  if (right) return ` data-align="right"`;
   return "";
 }
 

@@ -97,13 +97,13 @@ export const classes = {
   // Header avatar. min/max pin the box so the flex row can neither squeeze nor
   // stretch it around a long display name.
   avatarSm: style({
-    width: "32px",
-    minWidth: "32px",
-    maxWidth: "32px",
-    height: "32px",
-    minHeight: "32px",
-    maxHeight: "32px",
-    fontSize: "16px",
+    width: "25px",
+    minWidth: "25px",
+    maxWidth: "25px",
+    height: "25px",
+    minHeight: "25px",
+    maxHeight: "25px",
+    fontSize: "13px",
   }),
 
   // Profile-page avatar, pinned to 60x60.
@@ -405,6 +405,17 @@ globalStyle(`${readme} table`, {
   maxWidth: "100%",
   overflowX: "auto",
   margin: "0.75rem 0",
+});
+
+// Per-column alignment from the table's delimiter row (`:---:` / `---:`).
+// markdown.ts marks the cells with data-align because the CSP drops the inline
+// style attribute it used to write. Left is the base rule, so it needs nothing.
+globalStyle(`${readme} th[data-align="center"], ${readme} td[data-align="center"]`, {
+  textAlign: "center",
+});
+
+globalStyle(`${readme} th[data-align="right"], ${readme} td[data-align="right"]`, {
+  textAlign: "right",
 });
 
 globalStyle(`${readme} del`, { color: vars.textDim });
