@@ -1,7 +1,6 @@
 services:
   dough-git:
-    build: .
-    image: dough-git:latest
+    image: doughmination/dough-git:latest
     container_name: dough-git
     restart: unless-stopped
 
