@@ -46,7 +46,7 @@ export const classes = {
   siteLogo: style({
     width: "1.5rem",
     height: "1.5rem",
-    borderRadius: "0.25rem",
+    borderRadius: 0,
     objectFit: "cover",
   }),
 
@@ -85,7 +85,7 @@ export const classes = {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: "50%",
+    borderRadius: 0,
     background: vars.surfaceHi,
     color: vars.textSoft,
     fontWeight: 600,
@@ -272,7 +272,7 @@ export const classes = {
     display: "inline-block",
     padding: "0.05rem 0.4rem",
     marginLeft: "0.4rem",
-    borderRadius: "999px",
+    borderRadius: 0,
     border: `1px solid ${vars.border}`,
     background: vars.surfaceHi,
     fontFamily: vars.mono,
@@ -348,7 +348,7 @@ globalStyle(`${readme} p`, { margin: "0.75rem 0" });
 globalStyle(`${readme} code`, {
   background: vars.surfaceHi,
   padding: "0.12em 0.35em",
-  borderRadius: "4px",
+  borderRadius: 0,
   fontSize: "0.9em",
 });
 

@@ -55,9 +55,10 @@ createGlobalTheme(":root", vars, {
   textSoft: "#c9cfe0",
   text: "#f4f6fb",
 
-  font: "system-ui, -apple-system, sans-serif",
+  // Comic Code loaded in fonts.css.ts (imported before this file in index.ts).
+  font: "'Comic Code', system-ui, -apple-system, sans-serif",
   mono: "ui-monospace, SFMono-Regular, Menlo, monospace",
-  radius: "6px",
+  radius: "0",
 });
 
 globalStyle(":root", { colorScheme: "dark" });

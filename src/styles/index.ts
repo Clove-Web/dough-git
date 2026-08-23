@@ -2,6 +2,7 @@
 // effects) and exposes the component class names. The esbuild + vanilla-extract
 // build turns all of this into one static CSS file at compile time.
 
+import "./fonts.css.ts";
 import "./theme.css.ts";
 import "./global.css.ts";
 
