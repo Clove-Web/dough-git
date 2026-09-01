@@ -112,7 +112,11 @@ app.use("*", async (c, next) => {
   if (GIT_RPC.test(c.req.path) || c.req.path.endsWith("/info/refs")) return;
   c.header("Content-Security-Policy", CSP);
   c.header("X-Content-Type-Options", "nosniff");
-  c.header("Referrer-Policy", "no-referrer");
+  // Not "no-referrer": under that policy a browser sends `Origin: null` on
+  // same-origin form POSTs (Fetch, "append a request Origin header"), and no
+  // Referer to fall back on, so the CSRF check below rejects every form on the
+  // site. "same-origin" leaks nothing outward and keeps both headers intact.
+  c.header("Referrer-Policy", "same-origin");
   c.header("X-Frame-Options", "DENY");
   if (SITE_ORIGIN.startsWith("https://")) {
     c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
