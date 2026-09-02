@@ -11,7 +11,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Point config at a throwaway database BEFORE importing anything that opens it.
 const root = mkdtempSync(join(tmpdir(), "dough-own-"));
 process.env.MINIGIT_REPOS_ROOT = root;
 process.env.MINIGIT_DB_PATH = join(root, "test.db");
@@ -30,8 +29,6 @@ function basic(user, pass) {
   return `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`;
 }
 
-// ---- setup ------------------------------------------------------------------
-
 const alex = rememberUser({
   sub: "oidc-alex",
   username: "Alex.Kim",
@@ -48,8 +45,6 @@ const sam = rememberUser({
 
 check("username is slugified into an owner segment", alex.slug === "alex.kim");
 
-// A second account whose name collides must not land in the first one's
-// namespace — that would hand it push rights over someone else's repos.
 const impostor = rememberUser({
   sub: "oidc-impostor",
   username: "alex.kim",
@@ -61,8 +56,6 @@ check("colliding usernames get distinct slugs", impostor.slug === "alex.kim-2");
 
 const alexToken = createToken("laptop", alex.slug, alex.sub);
 const samToken = createToken("laptop", sam.slug, sam.sub);
-
-// ---- identity ---------------------------------------------------------------
 
 check(
   "no credentials is anonymous",
@@ -96,14 +89,10 @@ check(
   authenticateGit(basic("", alexToken)).kind === "rejected",
 );
 
-// The instance-wide token is gone: no credential acts as anything but one
-// account, so a would-be static token is simply not a token.
 check(
   "there is no instance-wide credential any more",
   authenticateGit(basic("anything", "static-instance-token")).kind === "rejected",
 );
-
-// ---- actor ------------------------------------------------------------------
 
 check("a user token acts as its owner", gitActor(asAlex) === "alex.kim");
 check("anonymous acts as nobody", gitActor({ kind: "anonymous" }) === null);
@@ -111,8 +100,6 @@ check(
   "rejected credentials act as nobody",
   gitActor({ kind: "rejected", message: "no" }) === null,
 );
-
-// ---- token listing is per-owner ---------------------------------------------
 
 check(
   "a user only sees their own tokens",

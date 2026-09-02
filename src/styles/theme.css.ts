@@ -55,7 +55,6 @@ createGlobalTheme(":root", vars, {
   textSoft: "#c9cfe0",
   text: "#f4f6fb",
 
-  // Comic Code loaded in fonts.css.ts (imported before this file in index.ts).
   font: "'Comic Code', system-ui, -apple-system, sans-serif",
   mono: "ui-monospace, SFMono-Regular, Menlo, monospace",
   radius: "0",

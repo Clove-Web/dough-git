@@ -20,8 +20,6 @@ export function now(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-// True if `table` already has `column` — used to apply additive migrations to
-// databases created by an older version.
 export function hasColumn(table: string, column: string): boolean {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as unknown as {
     name: string;

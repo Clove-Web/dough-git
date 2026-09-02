@@ -55,9 +55,6 @@ export function listUsers(): UserRow[] {
     .all() as unknown as UserRow[];
 }
 
-// Pick a slug not already claimed by a different account. Two people called
-// "Alex Kim" would otherwise both land on `alex-kim`, and the second one would
-// inherit push rights over the first one's repos.
 function uniqueSlug(preferred: string, sub: string): string {
   const taken = (slug: string) => {
     const row = findUserBySlug(slug);
@@ -68,7 +65,6 @@ function uniqueSlug(preferred: string, sub: string): string {
     const candidate = `${preferred}-${n}`;
     if (!taken(candidate)) return candidate;
   }
-  // Astronomically unlikely; fall back to something guaranteed free.
   return `${preferred}-${sub.replace(/[^a-z0-9]/gi, "").slice(0, 8).toLowerCase()}`;
 }
 
@@ -79,9 +75,6 @@ export interface RememberInput {
   picture: string | null;
 }
 
-// Record a successful login and return the row. An existing user keeps their
-// slug even if they rename themselves upstream — the slug is a path segment
-// their repos already live under, so it can't move without moving them.
 export function rememberUser(input: RememberInput): UserRow {
   const existing = findUserBySub(input.sub);
   const ts = now();
@@ -105,7 +98,6 @@ export function rememberUser(input: RememberInput): UserRow {
   return { ...input, slug, created_at: ts, last_login: ts };
 }
 
-// Backfill hook for tokens.ts: the slug that owns a given OIDC sub, if known.
 export function slugForSub(sub: string | null): string | null {
   if (!sub) return null;
   return findUserBySub(sub)?.slug ?? null;

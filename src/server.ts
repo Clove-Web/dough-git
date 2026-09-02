@@ -33,10 +33,26 @@ import {
   listCollaborators,
   setCollaborator,
   removeCollaborator,
-  dropRepoAccess,
   sharedWith,
   type Access,
 } from "./access.ts";
+import { clearRepoMetadata } from "./repometa.ts";
+import { notifyRepoCreated, notifyRepoDeleted, notifyPush } from "./notify.ts";
+import { getSettings, setDiscordWebhook, setPrefs } from "./settings.ts";
+import {
+  discordWebhookUrl,
+  mirrorUrl,
+  mirrorHost,
+  MIRROR_KINDS,
+  type MirrorKind,
+} from "./urls.ts";
+import {
+  getStatuses,
+  checkAllMirrors,
+  needsCheck,
+  markStale,
+  dropMirrorStatusKind,
+} from "./mirror.ts";
 import {
   safeRef,
   refDir,
@@ -44,7 +60,12 @@ import {
   repoExists,
   initBareRepo,
   createRepo,
-  deleteRepo,
+  trashRepo,
+  listTrash,
+  restoreFromTrash,
+  purgeFromTrash,
+  purgeExpired,
+  trashHasName,
   isRepoPublic,
   setRepoPublic,
   listRepos,
@@ -57,6 +78,10 @@ import {
   readme,
   description,
   setDescription,
+  readLinks,
+  setLinks,
+  localMirrorRefs,
+  type MirrorLink,
   type RepoRef,
   type RepoSummary,
   type RefList,
@@ -73,27 +98,14 @@ const app = new Hono<Env>({ strict: false });
 
 const SITE_ORIGIN = new URL(config.baseUrl).origin;
 
-// The git transport authenticates with a token on every request and never with
-// a cookie, so the browser-only protections below skip it.
 const GIT_RPC = /\/(?:git-upload-pack|git-receive-pack)$/;
 
-// Attach the logged-in user (if any) to every request.
-//
-// The cookie is signed and self-contained, so it stays valid for its full 30
-// days no matter what happens upstream. Re-anchoring it on the user directory
-// each request is what makes removing an account take effect now rather than a
-// month from now.
 app.use("*", async (c, next) => {
   const session = readSession(getCookie(c, SESSION_COOKIE));
   c.set("user", session && "sub" in session ? currentUser(session) : null);
   await next();
 });
 
-// ---- response hardening -----------------------------------------------------
-
-// README content is attacker-controlled and rendered into these pages, so the
-// CSP is the backstop behind markdown.ts: no inline script, no plugins, and no
-// framing. Images are left open because READMEs legitimately hotlink badges.
 const CSP = [
   "default-src 'self'",
   "script-src 'self'",
@@ -112,10 +124,6 @@ app.use("*", async (c, next) => {
   if (GIT_RPC.test(c.req.path) || c.req.path.endsWith("/info/refs")) return;
   c.header("Content-Security-Policy", CSP);
   c.header("X-Content-Type-Options", "nosniff");
-  // Not "no-referrer": under that policy a browser sends `Origin: null` on
-  // same-origin form POSTs (Fetch, "append a request Origin header"), and no
-  // Referer to fall back on, so the CSRF check below rejects every form on the
-  // site. "same-origin" leaks nothing outward and keeps both headers intact.
   c.header("Referrer-Policy", "same-origin");
   c.header("X-Frame-Options", "DENY");
   if (SITE_ORIGIN.startsWith("https://")) {
@@ -123,13 +131,6 @@ app.use("*", async (c, next) => {
   }
 });
 
-// ---- CSRF -------------------------------------------------------------------
-
-// Every state-changing form here is authorised by the session cookie alone, so
-// a cross-site POST would otherwise act as the signed-in user. SameSite=Lax
-// already blocks the common case; this closes the rest, and costs one header
-// comparison. A browser always sends Origin on POST, so a missing one is not a
-// browser form and has nothing to lose.
 function sameOrigin(origin: string | undefined, referer: string | undefined): boolean {
   if (origin) return origin === SITE_ORIGIN;
   if (referer) {
@@ -153,8 +154,6 @@ app.use("*", async (c, next) => {
   await next();
 });
 
-// ---- static files (bring your own style.css) --------------------------------
-
 const CONTENT_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -167,9 +166,6 @@ const CONTENT_TYPES: Record<string, string> = {
 const STATIC_ROOT = resolve(config.staticDir);
 
 app.get("/static/*", (c) => {
-  // Decode before checking: a `..` that arrives percent-encoded is still a
-  // `..` by the time the filesystem sees it. Resolve, then prove the result is
-  // still inside the static root rather than trusting the pattern match.
   let rel: string;
   try {
     rel = decodeURIComponent(c.req.path.replace(/^\/static\//, ""));
@@ -195,8 +191,6 @@ app.get("/static/*", (c) => {
     },
   });
 });
-
-// ---- auth -------------------------------------------------------------------
 
 app.get("/auth/login", async (c) => {
   if (!oidcEnabled) {
@@ -224,7 +218,6 @@ app.get("/auth/callback", async (c) => {
   const tx = getCookie(c, OAUTH_COOKIE);
   deleteCookie(c, OAUTH_COOKIE, { path: "/" });
 
-  // If PocketID redirected back with an error, surface it directly.
   const idpError = c.req.query("error");
   if (idpError) {
     console.error(
@@ -239,10 +232,6 @@ app.get("/auth/callback", async (c) => {
     );
   }
 
-  // Behind the reverse proxy, c.req.url carries the internal host
-  // (127.0.0.1:4010). The OIDC token exchange must use the SAME redirect_uri we
-  // sent in the auth request, so rebuild the callback URL from the public base
-  // URL, preserving the query (code, state, iss).
   const currentUrl = `${config.baseUrl}/auth/callback${new URL(c.req.url).search}`;
 
   let user = null;
@@ -286,16 +275,66 @@ app.get("/auth/logout", (c) => {
   return c.redirect("/");
 });
 
-// ---- token management (login required) --------------------------------------
+app.get("/settings", (c) => {
+  const user = c.get("user");
+  if (!user) return c.redirect("/auth/login");
+  return c.html(
+    view.settingsPage({
+      user,
+      settings: getSettings(view.ownerOf(user)),
+      saved: c.req.query("saved") ? "saved." : null,
+    }),
+  );
+});
 
-app.get("/tokens", (c) => {
+app.post("/settings/discord", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.text("forbidden\n", 403);
+  const owner = view.ownerOf(user);
+  const form = await c.req.formData();
+  const raw = String(form.get("url") ?? "").trim();
+
+  if (!raw) {
+    setDiscordWebhook(owner, null);
+    return c.redirect("/settings?saved=1");
+  }
+  const url = discordWebhookUrl(raw);
+  if (!url) {
+    return c.html(
+      view.messagePage({
+        title: "not a discord webhook",
+        message:
+          "That doesn't look like a Discord webhook URL. It should start with " +
+          "https://discord.com/api/webhooks/ — nothing else is accepted.",
+        user,
+      }),
+      400,
+    );
+  }
+  setDiscordWebhook(owner, url);
+  return c.redirect("/settings?saved=1");
+});
+
+app.post("/settings/prefs", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.text("forbidden\n", 403);
+  const form = await c.req.formData();
+  setPrefs(view.ownerOf(user), {
+    defaultPrivate: form.get("default_private") != null,
+    discordPrivate: form.get("discord_private") != null,
+    mirrorAuto: form.get("mirror_auto") != null,
+  });
+  return c.redirect("/settings?saved=1");
+});
+
+app.get("/settings/tokens", (c) => {
   const user = c.get("user");
   if (!user) return c.redirect("/auth/login");
   const owner = view.ownerOf(user);
   return c.html(view.tokensPage({ tokens: listTokens(owner), user }));
 });
 
-app.post("/tokens", async (c) => {
+app.post("/settings/tokens", async (c) => {
   const user = c.get("user");
   if (!user) return c.text("forbidden\n", 403);
   const owner = view.ownerOf(user);
@@ -306,15 +345,82 @@ app.post("/tokens", async (c) => {
   );
 });
 
-app.post("/tokens/:id/revoke", (c) => {
+app.post("/settings/tokens/:id/revoke", (c) => {
   const user = c.get("user");
   if (!user) return c.text("forbidden\n", 403);
   revokeToken(c.req.param("id"), view.ownerOf(user));
-  return c.redirect("/tokens");
+  return c.redirect("/settings/tokens");
 });
 
-// ---- repo creation (login required) -----------------------------------------
-// Repos are always created under the logged-in user's own username.
+app.get("/tokens", (c) => c.redirect("/settings/tokens", 301));
+
+app.get("/settings/deleted", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.redirect("/auth/login");
+  const owner = view.ownerOf(user);
+
+  for (const gone of await purgeExpired(owner)) {
+    clearRepoMetadata({ owner, name: gone.name });
+    console.log(`[trash] purged ${owner}/${gone.name} past retention`);
+  }
+
+  return c.html(
+    view.deletedPage({
+      user,
+      entries: await listTrash(owner),
+      retentionDays: config.trashDays,
+    }),
+  );
+});
+
+app.post("/settings/deleted/restore", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.text("forbidden\n", 403);
+  const owner = view.ownerOf(user);
+  const form = await c.req.formData();
+
+  const result = await restoreFromTrash(owner, String(form.get("entry") ?? ""));
+  if (!result.ok || !result.meta) {
+    return c.html(
+      view.messagePage({
+        title: "could not restore",
+        message: result.error ?? "unknown error",
+        user,
+      }),
+      400,
+    );
+  }
+
+  const ref = { owner, name: result.meta.name };
+  for (const grant of result.meta.grants) {
+    if (!isLevel(grant.level)) continue;
+    if (!findUserBySlug(grant.slug)) {
+      console.warn(
+        `[trash] restoring ${refSlug(ref)}: dropping grant for unknown user ${grant.slug}`,
+      );
+      continue;
+    }
+    setCollaborator(ref, grant.slug, grant.level);
+  }
+
+  console.log(`[trash] restored ${refSlug(ref)}`);
+  return c.redirect(`/${ref.owner}/${ref.name}/`);
+});
+
+app.post("/settings/deleted/purge", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.text("forbidden\n", 403);
+  const owner = view.ownerOf(user);
+  const form = await c.req.formData();
+  const entry = String(form.get("entry") ?? "");
+
+  const found = (await listTrash(owner)).find((e) => e.entry === entry);
+  if (await purgeFromTrash(owner, entry)) {
+    if (found) clearRepoMetadata({ owner, name: found.name });
+    console.log(`[trash] purged ${owner}/${found?.name ?? entry}`);
+  }
+  return c.redirect("/settings/deleted");
+});
 
 app.post("/new", async (c) => {
   const user = c.get("user");
@@ -325,17 +431,21 @@ app.post("/new", async (c) => {
   if (!result.ok || !result.ref) {
     return c.html(
       view.messagePage({
-        title: "could not create repo",
+        title: result.reserved ? "that name is still reserved" : "could not create repo",
         message: result.error ?? "unknown error",
         user,
       }),
-      400,
+      result.reserved ? 409 : 400,
     );
   }
+  clearRepoMetadata(result.ref);
+  const startsPublic = !getSettings(owner).defaultPrivate;
+  if (startsPublic) {
+    await setRepoPublic(result.ref, true);
+  }
+  notifyRepoCreated(result.ref, owner, startsPublic);
   return c.redirect(`/${result.ref.owner}/${result.ref.name}/`);
 });
-
-// ---- git smart HTTP ---------------------------------------------------------
 
 const GIT_SERVICES: GitService[] = ["git-upload-pack", "git-receive-pack"];
 
@@ -346,9 +456,6 @@ function authChallenge(message = "authentication required"): Response {
   });
 }
 
-// Returns null when access is allowed, otherwise a short-circuit Response.
-// Auth is checked BEFORE existence so a valid push token can auto-create a
-// missing repo (and a missing private repo prompts rather than 404s).
 async function gitGate(
   c: { req: { header: (n: string) => string | undefined } },
   ref: RepoRef,
@@ -358,8 +465,6 @@ async function gitGate(
   const actor = gitActor(auth);
   const exists = await repoExists(ref);
 
-  // Bad credentials are a dead end, not a retry: re-prompting just loops the
-  // credential helper past the same wrong username.
   if (auth.kind === "rejected") {
     console.warn(`[git] denied ${refSlug(ref)}: ${auth.message}`);
     return new Response(`${auth.message}\n`, { status: 403 });
@@ -368,8 +473,6 @@ async function gitGate(
   if (needPush) {
     if (!actor) return authChallenge();
 
-    // A repo that doesn't exist yet has no collaborators, so the only person
-    // who can bring it into being is the owner of the namespace it names.
     if (!exists) {
       if (actor !== ref.owner) {
         console.warn(`[git] denied create of ${refSlug(ref)} by ${actor}`);
@@ -378,11 +481,21 @@ async function gitGate(
           { status: 403 },
         );
       }
+      if (await trashHasName(ref.owner, ref.name)) {
+        console.warn(`[git] refused auto-create of trashed ${refSlug(ref)}`);
+        return new Response(
+          `${refSlug(ref)} is in Recently Deleted. Restore it, or delete it ` +
+            `permanently, before pushing to that name again.\n`,
+          { status: 409 },
+        );
+      }
       if (!config.autoCreate) {
         return new Response("repository not found\n", { status: 404 });
       }
       await initBareRepo(ref);
+      clearRepoMetadata(ref);
       console.log(`[git] auto-created ${refSlug(ref)}.git on first push`);
+      notifyRepoCreated(ref, actor, false);
       return null;
     }
 
@@ -397,13 +510,10 @@ async function gitGate(
     return null;
   }
 
-  // Reads. A private repo must not confirm its own existence to somebody with
-  // no access, so "no access" and "no such repo" give the same 404.
   if (exists) {
     const isPublic = await isRepoPublic(ref);
     if (canRead({ ref, isPublic, viewer: actor })) return null;
   }
-  // Prompt for credentials if none were offered — the repo may well be theirs.
   if (auth.kind === "anonymous") return authChallenge();
   return new Response("repository not found\n", { status: 404 });
 }
@@ -424,27 +534,45 @@ async function rpcHandler(c: any, service: GitService): Promise<Response> {
   if (!ref) return c.text("bad repo\n", 400);
   const gate = await gitGate(c, ref, service === "git-receive-pack");
   if (gate) return gate;
+
+  const isPush = service === "git-receive-pack";
+  const before = isPush ? await localMirrorRefs(ref) : new Map<string, string>();
+  const actor = gitActor(authenticateGit(c.req.header("authorization")));
+  const isPublic = isPush ? await isRepoPublic(ref) : false;
+
   return serviceRpc({
     repoDir: refDir(ref),
     service,
     body: c.req.raw.body,
     gzip: c.req.header("content-encoding") === "gzip",
+    onDone: isPush
+      ? (code) => {
+          if (code !== 0) {
+            console.warn(`[git] receive-pack for ${refSlug(ref)} exited ${code}`);
+            return;
+          }
+          void (async () => {
+            try {
+              const after = await localMirrorRefs(ref);
+              markStale(ref);
+              notifyPush(ref, actor ?? "unknown", isPublic, before, after);
+            } catch (err) {
+              console.warn(`[git] post-push processing failed for ${refSlug(ref)}:`, err);
+            }
+          })();
+        }
+      : undefined,
   });
 }
 
 app.post("/:owner/:repo/git-upload-pack", (c) => rpcHandler(c, "git-upload-pack"));
 app.post("/:owner/:repo/git-receive-pack", (c) => rpcHandler(c, "git-receive-pack"));
 
-// ---- viewer -----------------------------------------------------------------
-
-// The owner slug of whoever is browsing, or null when nobody is signed in.
 function viewerOf(c: { get: (k: "user") => SessionUser | null }): string | null {
   const user = c.get("user");
   return user ? view.ownerOf(user) : null;
 }
 
-// Filter a repo listing down to what this viewer may see. Public repos are in
-// for everybody; private ones only for their owner and invited collaborators.
 function readable(all: RepoSummary[], viewer: string | null): RepoSummary[] {
   return all.filter((r) =>
     canRead({
@@ -478,12 +606,6 @@ function notFound(c: any) {
   );
 }
 
-// A repo the caller may look at, with what they may do to it. Null means 404 —
-// including when the repo exists but isn't theirs to know about.
-//
-// `rev` is the revision being viewed, taken from `?h=` and resolved against the
-// refs this repo actually has. It is never the raw query value, so it is safe
-// to pass to git.
 interface ViewableRepo {
   ref: RepoRef;
   isPublic: boolean;
@@ -563,8 +685,6 @@ app.get("/:owner/:name/blob/:path{.*}", async (c) => {
 app.get("/:owner/:name/commit/:sha", async (c) => {
   const found = await viewable(c);
   if (!found) return notFound(c);
-  // commit() refuses anything that isn't an object id, so a `--option` in the
-  // URL lands here as a 404 rather than as an argument to git.
   const detail = await commit(found.ref, c.req.param("sha"));
   if (!detail) return notFound(c);
   return c.html(
@@ -577,11 +697,6 @@ app.get("/:owner/:name/commit/:sha", async (c) => {
   );
 });
 
-// ---- repo management --------------------------------------------------------
-
-// Resolve params for a management action. Visibility, deletion and the
-// collaborator list are the owner's alone: a write collaborator can push, but
-// cannot publish somebody else's repo or give away access to it.
 async function ownedRef(c: any): Promise<RepoRef | null> {
   const user = c.get("user");
   if (!user) return null;
@@ -590,8 +705,6 @@ async function ownedRef(c: any): Promise<RepoRef | null> {
   return (await repoExists(ref)) ? ref : null;
 }
 
-// The description is repo content rather than repo governance, so anyone who
-// can push may edit it — the same people who could change it by committing.
 async function writableRef(c: any): Promise<RepoRef | null> {
   const ref = safeRef(c.req.param("owner"), c.req.param("name"));
   if (!ref || !(await repoExists(ref))) return null;
@@ -618,11 +731,31 @@ app.post("/:owner/:name/visibility", async (c) => {
 app.post("/:owner/:name/delete", async (c) => {
   const ref = await ownedRef(c);
   if (!ref) return notFound(c);
-  await deleteRepo(ref);
-  // Grants must not outlive the repo, or a rebuilt one of the same name would
-  // silently come back shared.
-  dropRepoAccess(ref);
-  return c.redirect("/");
+  const user = c.get("user")!;
+  const wasPublic = await isRepoPublic(ref);
+
+  const result = await trashRepo(ref, {
+    deletedAt: Math.floor(Date.now() / 1000),
+    deletedBy: view.ownerOf(user),
+    grants: listCollaborators(ref).map((g) => ({
+      slug: g.slug,
+      level: g.level,
+    })),
+  });
+  if (!result.ok) {
+    return c.html(
+      view.messagePage({
+        title: "could not delete",
+        message: result.error ?? "unknown error",
+        user,
+      }),
+      400,
+    );
+  }
+
+  clearRepoMetadata(ref);
+  notifyRepoDeleted(ref, view.ownerOf(user), wasPublic);
+  return c.redirect("/settings/deleted");
 });
 
 app.post("/:owner/:name/collaborators", async (c) => {
@@ -670,8 +803,6 @@ app.post("/:owner/:name/collaborators/remove", async (c) => {
   return c.redirect(`/${ref.owner}/${ref.name}/`);
 });
 
-// Profile page. Registered before the two-segment repo routes only for
-// readability — they differ in path length, so they can't collide.
 app.get("/:owner", async (c) => {
   const owner = c.req.param("owner");
   if (!safeRef(owner, "x")) return notFound(c);
@@ -683,7 +814,6 @@ app.get("/:owner", async (c) => {
   const repos = readable(owned, viewer);
   const profile = findUserBySlug(owner);
 
-  // Nobody by that name, and nothing of theirs to show.
   if (!profile && owned.length === 0) return notFound(c);
   return c.html(view.profilePage({ owner, profile, repos, user }));
 });
@@ -693,15 +823,32 @@ app.get("/:owner/:name", async (c) => {
   if (!found) return notFound(c);
   const { ref, isPublic, access, refs, rev } = found;
 
-  const [commits, desc] = await Promise.all([
+  const [commits, desc, links] = await Promise.all([
     log(ref, rev, 1),
     description(ref),
+    readLinks(ref),
   ]);
-  // An empty repo has no tree to search, so skip the README lookup entirely.
   const readmeFile = commits.length ? await readme(ref, rev) : null;
 
   const user = c.get("user");
   const isOwner = user != null && view.ownerOf(user) === ref.owner;
+  const canPush = access === "write";
+
+  const statuses = getStatuses(ref);
+  let localSha: string | null = null;
+  if (links.length > 0) {
+    const localRefs = await localMirrorRefs(ref);
+    localSha = localRefs.get(`refs/heads/${refs.head}`) ?? null;
+
+    if (canPush && getSettings(ref.owner).mirrorAuto) {
+      const due = links.filter((l) => !l.isPrivate && needsCheck(statuses.get(l.kind)));
+      if (due.length > 0) {
+        void checkAllMirrors(ref, due).catch((err) => {
+          console.warn(`[mirror] background check failed for ${refSlug(ref)}:`, err);
+        });
+      }
+    }
+  }
 
   return c.html(
     view.summaryPage({
@@ -709,16 +856,17 @@ app.get("/:owner/:name", async (c) => {
       isPublic,
       empty: refs.branches.length === 0,
       readme: readmeFile,
-      // The raw `description` file, for the edit form. Empty means unset.
       rawDescription: desc,
       description: view.repoDescription({
         ...ref,
         description: desc,
         readme: readmeFile,
       }),
-      canPush: access === "write",
-      // Only the owner manages the grant list, so only they are shown it.
+      canPush,
       collaborators: isOwner ? listCollaborators(ref) : null,
+      links,
+      mirrorStatuses: statuses,
+      localSha,
       refs,
       rev,
       user,
@@ -726,7 +874,58 @@ app.get("/:owner/:name", async (c) => {
   );
 });
 
-// ---- boot -------------------------------------------------------------------
+app.post("/:owner/:name/mirrors", async (c) => {
+  const ref = await ownedRef(c);
+  if (!ref) return notFound(c);
+  const form = await c.req.formData();
+
+  const links: MirrorLink[] = [];
+  const rejected: string[] = [];
+  for (const kind of MIRROR_KINDS) {
+    const raw = String(form.get(kind) ?? "").trim();
+    if (!raw) continue;
+    const url = mirrorUrl(kind, raw);
+    if (!url) {
+      rejected.push(kind);
+      continue;
+    }
+    links.push({
+      kind,
+      url,
+      isPrivate: form.get(`${kind}_private`) != null,
+    });
+  }
+
+  if (rejected.length > 0) {
+    return c.html(
+      view.messagePage({
+        title: "that isn't a mirror URL",
+        message:
+          `The ${rejected.join(" and ")} link was refused. A mirror must be an ` +
+          `https URL of the form https://${mirrorHost(rejected[0] as MirrorKind)}/owner/repo ` +
+          `— no other host, no credentials, no port.`,
+        user: c.get("user"),
+      }),
+      400,
+    );
+  }
+
+  const before = await readLinks(ref);
+  await setLinks(ref, links);
+  for (const old of before) {
+    const still = links.find((l) => l.kind === old.kind && l.url === old.url);
+    if (!still) dropMirrorStatusKind(ref, old.kind);
+  }
+  return c.redirect(`/${ref.owner}/${ref.name}/`);
+});
+
+app.post("/:owner/:name/mirrors/check", async (c) => {
+  const ref = await writableRef(c);
+  if (!ref) return notFound(c);
+  const links = await readLinks(ref);
+  await checkAllMirrors(ref, links);
+  return c.redirect(`/${ref.owner}/${ref.name}/`);
+});
 
 serve(
   {

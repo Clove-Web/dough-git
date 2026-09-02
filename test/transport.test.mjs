@@ -28,9 +28,6 @@ function check(label, cond) {
   if (!cond) failures++;
 }
 
-// IMPORTANT: async. The HTTP server runs in this same process, so blocking the
-// event loop (execFileSync) would deadlock — git would wait on a server that
-// can't run. Awaiting keeps the loop free to serve requests.
 async function git(cwd, args) {
   const { stdout } = await execFileAsync("git", args, {
     cwd,
@@ -48,7 +45,6 @@ async function git(cwd, args) {
   return stdout;
 }
 
-// ---- unit: pkt-line framing -------------------------------------------------
 check(
   'pktLine("# service=git-upload-pack\\n") == "001e..."',
   pktLine("# service=git-upload-pack\n").startsWith("001e"),
@@ -58,7 +54,6 @@ check(
   pktLine("# service=git-receive-pack\n").startsWith("001f"),
 );
 
-// ---- set up a real bare repo ------------------------------------------------
 const work = mkdtempSync(join(tmpdir(), "dough-git-"));
 const seed = join(work, "seed");
 const bare = join(work, "repo.git");
@@ -70,7 +65,6 @@ await git(seed, ["commit", "-q", "-m", "initial"]);
 await git(seed, ["branch", "-M", "main"]);
 await git(work, ["clone", "-q", "--bare", seed, bare]);
 
-// ---- adapter: serve src/smart-http.ts over Node http ------------------------
 async function sendResponse(res, response) {
   res.statusCode = response.status;
   response.headers.forEach((v, k) => res.setHeader(k, v));
@@ -128,20 +122,17 @@ const base = `http://127.0.0.1:${port}/repo.git`;
 let cloned = false;
 let pushed = false;
 try {
-  // ---- clone over HTTP ------------------------------------------------------
   const out = join(work, "out");
   await git(work, ["clone", "-q", base, out]);
   const content = readFileSync(join(out, "hello.txt"), "utf8");
   cloned = content === "hello backup\n";
   check("clone over HTTP retrieves file content", cloned);
 
-  // ---- push over HTTP -------------------------------------------------------
   writeFileSync(join(out, "second.txt"), "more data\n");
   await git(out, ["add", "."]);
   await git(out, ["commit", "-q", "-m", "second"]);
   await git(out, ["push", "-q", "origin", "main"]);
 
-  // Bare repo should now have the second commit.
   const logOut = await git(bare, ["log", "--oneline"]);
   pushed = logOut.includes("second");
   check("push over HTTP updates the bare repo", pushed);

@@ -47,8 +47,6 @@ async function git(cwd, args) {
   return stdout;
 }
 
-// ---- a real bare repo with two branches and a tag ---------------------------
-
 const ref = { owner: "alex", name: "notes" };
 const bare = refDir(ref);
 mkdirSync(join(root, "alex"), { recursive: true });
@@ -68,14 +66,10 @@ await git(work, ["push", "-q", bare, "main", "feature/thing", "v1"]);
 
 const refs = await listRefs(ref);
 
-// ---- listing ----------------------------------------------------------------
-
 check("HEAD's branch is reported", refs.head === "main");
 check("branches are listed", refs.branches.includes("main") && refs.branches.includes("feature/thing"));
 check("tags are listed", refs.tags.includes("v1"));
 check("a tag is not mistaken for a branch", !refs.branches.includes("v1"));
-
-// ---- resolution -------------------------------------------------------------
 
 check("no request resolves to HEAD", (await resolveRev(ref, undefined, refs)) === "main");
 check("an empty request resolves to HEAD", (await resolveRev(ref, "", refs)) === "main");
@@ -91,10 +85,6 @@ check(
   "an abbreviated object id resolves to itself",
   (await resolveRev(ref, head.slice(0, 10), refs)) === head.slice(0, 10),
 );
-
-// ---- the security property --------------------------------------------------
-// Anything not on the allow-list falls back to HEAD, so no attacker-chosen
-// string ever reaches git as an argument.
 
 const hostile = [
   "--output=/tmp/dough-pwned",
@@ -114,13 +104,10 @@ for (const candidate of hostile) {
   );
 }
 
-// The reads that take a revision must survive being given one, whatever it was.
 check(
   "log on the resolved revision still works",
   (await log(ref, await resolveRev(ref, "--output=/tmp/x", refs), 5)).length > 0,
 );
-
-// ---- description ------------------------------------------------------------
 
 check("a fresh repo has no description", (await description(ref)) === "");
 

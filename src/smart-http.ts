@@ -24,15 +24,11 @@ const BIN: Record<GitService, string> = {
   "git-receive-pack": "receive-pack",
 };
 
-// Encode a single pkt-line: a 4-char hex length prefix (counting itself)
-// followed by the payload. `0000` is the special "flush" packet.
 export function pktLine(payload: string): string {
   const length = 4 + Buffer.byteLength(payload);
   return length.toString(16).padStart(4, "0") + payload;
 }
 
-// Build the ref-advertisement body for a GET /info/refs request.
-// Format:  pkt("# service=<svc>\n") + flush + <git advertise-refs output>
 export async function advertiseRefs(
   repoDir: string,
   service: GitService,
@@ -61,14 +57,11 @@ export async function advertiseRefs(
 export interface RpcOptions {
   repoDir: string;
   service: GitService;
-  // Raw request body as a web ReadableStream (c.req.raw.body).
   body: ReadableStream<Uint8Array> | null;
-  // True when the client sent `Content-Encoding: gzip`.
   gzip: boolean;
+  onDone?: (code: number) => void;
 }
 
-// Run an upload-pack / receive-pack RPC and return a streaming Response whose
-// body is the git process's stdout.
 export function serviceRpc(opts: RpcOptions): Response {
   const child = spawn(
     "git",
@@ -76,7 +69,6 @@ export function serviceRpc(opts: RpcOptions): Response {
     { stdio: ["pipe", "pipe", "inherit"] },
   );
 
-  // Pipe the (optionally gzip'd) request body into git's stdin.
   if (opts.body) {
     let input: NodeJS.ReadableStream = Readable.fromWeb(
       opts.body as import("node:stream/web").ReadableStream,
@@ -87,6 +79,22 @@ export function serviceRpc(opts: RpcOptions): Response {
     input.pipe(child.stdin);
   } else {
     child.stdin.end();
+  }
+
+  if (opts.onDone) {
+    const done = opts.onDone;
+    let fired = false;
+    const settle = (code: number) => {
+      if (fired) return;
+      fired = true;
+      try {
+        done(code);
+      } catch (err) {
+        console.error("[git] rpc completion handler threw:", err);
+      }
+    };
+    child.on("close", (code) => settle(code ?? 1));
+    child.on("error", () => settle(1));
   }
 
   const webStdout = Readable.toWeb(
@@ -102,7 +110,6 @@ export function serviceRpc(opts: RpcOptions): Response {
   });
 }
 
-// Build the Response for a GET /info/refs advertisement.
 export async function advertiseResponse(
   repoDir: string,
   service: GitService,

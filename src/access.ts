@@ -25,10 +25,8 @@ db.exec(`
   );
 `);
 
-// What an invited collaborator may do. The owner is never stored as one.
 export type Level = "read" | "write";
 
-// The resolved answer for one viewer against one repo.
 export type Access = "none" | "read" | "write";
 
 export function isLevel(value: string): value is Level {
@@ -52,9 +50,6 @@ export function listCollaborators(ref: RepoRef): CollaboratorRow[] {
     .all(ref.owner, ref.name) as unknown as CollaboratorRow[];
 }
 
-// Add or re-level a collaborator. Inviting the owner is a no-op: they already
-// have more than any invitation could grant, and storing it would let a later
-// "remove" imply they lost access.
 export function setCollaborator(
   ref: RepoRef,
   slug: string,
@@ -76,7 +71,6 @@ export function removeCollaborator(ref: RepoRef, slug: string): boolean {
   return Number(result.changes) > 0;
 }
 
-// Called when a repo is deleted, so its grants can't outlive it.
 export function dropRepoAccess(ref: RepoRef): void {
   db.prepare("DELETE FROM collaborators WHERE owner = ? AND repo = ?").run(
     ref.owner,
@@ -100,8 +94,6 @@ export interface SharedRepo {
   level: Level;
 }
 
-// Repos somebody else shared with `slug`. Used to show them on the front page
-// and on that person's own profile, where they'd otherwise be invisible.
 export function sharedWith(slug: string): SharedRepo[] {
   const rows = db
     .prepare(
@@ -122,13 +114,9 @@ export function sharedWith(slug: string): SharedRepo[] {
 export interface AccessQuery {
   ref: RepoRef;
   isPublic: boolean;
-  // The owner slug of whoever is asking, or null when nobody is signed in and
-  // no token was presented.
   viewer: string | null;
 }
 
-// The single place the read/write rule is written down. Everything else — the
-// viewer routes, the git transport, the management forms — asks this.
 export function accessFor(query: AccessQuery): Access {
   const { ref, isPublic, viewer } = query;
 

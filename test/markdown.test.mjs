@@ -18,8 +18,6 @@ function check(label, cond) {
 const has = (md, needle) => renderMarkdown(md).includes(needle);
 const lacks = (md, needle) => !renderMarkdown(md).includes(needle);
 
-// ---- security ---------------------------------------------------------------
-
 check(
   "script tags are never emitted",
   lacks("<script>alert(1)</script>", "<script"),
@@ -58,8 +56,6 @@ check(
   has("[docs](/docs/readme.md)", 'href="/docs/readme.md"'),
 );
 
-// ---- block rendering --------------------------------------------------------
-
 check("ATX heading", has("# Title", "<h1>Title</h1>"));
 check("deeper ATX heading", has("### Three", "<h3>Three</h3>"));
 check("setext heading", has("Title\n=====", "<h1>Title</h1>"));
@@ -96,8 +92,6 @@ check(
 );
 check("table head", has("| a | b |\n| - | - |\n| 1 | 2 |", "<th>a</th>"));
 check("table body", has("| a | b |\n| - | - |\n| 1 | 2 |", "<td>1</td>"));
-// Alignment is a data attribute, not an inline style — the CSP blocks style
-// attributes, so an inline text-align never reached the page.
 check(
   "table alignment centres",
   has("| a |\n| :-: |\n| 1 |", 'data-align="center"'),
@@ -142,8 +136,6 @@ check(
   lacks("visible <!-- secret --> text", "secret"),
 );
 
-// ---- inline rendering -------------------------------------------------------
-
 check("bold", has("**bold**", "<strong>bold</strong>"));
 check("italic", has("*italic*", "<em>italic</em>"));
 check("bold italic", has("***both***", "<strong><em>both</em></strong>"));
@@ -170,8 +162,6 @@ check(
 );
 check("hard break", has("line one  \nline two", "<br>"));
 check("ampersands are escaped once", has("a & b", "a &amp; b"));
-
-// ---- plainSummary -----------------------------------------------------------
 
 check(
   "plainSummary skips the leading heading",
@@ -215,8 +205,6 @@ check(
   })(),
 );
 check("plainSummary of an empty README is empty", plainSummary("") === "");
-
-// ---- robustness -------------------------------------------------------------
 
 check("empty input renders nothing", renderMarkdown("") === "");
 check(

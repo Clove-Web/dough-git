@@ -18,8 +18,6 @@ import { verifyDbToken } from "./tokens.ts";
 import { rememberUser, findUserBySub } from "./users.ts";
 import { ownerSlug } from "./git.ts";
 
-// ---- signed values ----------------------------------------------------------
-
 function b64url(input: Buffer | string): string {
   return Buffer.from(input).toString("base64url");
 }
@@ -30,14 +28,12 @@ function sign(payload: string): string {
     .digest("base64url");
 }
 
-// Encode an object into `payload.signature`, embedding an expiry.
 export function signValue(data: object, ttlSeconds: number): string {
   const body = { ...data, exp: Math.floor(Date.now() / 1000) + ttlSeconds };
   const payload = b64url(JSON.stringify(body));
   return `${payload}.${sign(payload)}`;
 }
 
-// Verify and decode a signed value; returns null if tampered or expired.
 export function verifyValue<T>(token: string | undefined): T | null {
   if (!token) return null;
   const dot = token.lastIndexOf(".");
@@ -61,25 +57,21 @@ export function verifyValue<T>(token: string | undefined): T | null {
   }
 }
 
-// ---- sessions ---------------------------------------------------------------
-
 export interface SessionUser {
   sub: string;
   email: string | null;
   name: string | null;
-  username: string | null; // PocketID preferred_username
-  slug: string; // owner namespace; assigned once, in users.ts
-  picture: string | null; // PocketID avatar URL
+  username: string | null;
+  slug: string;
+  picture: string | null;
 }
 
-// Sessions minted before slug/picture existed are still validly signed, so read
-// them defensively rather than logging everyone out.
 export function sessionSlug(user: SessionUser): string {
   return user.slug || ownerSlug(user.username ?? user.name ?? "user");
 }
 
-const SESSION_TTL = 60 * 60 * 24 * 30; // 30 days
-const OAUTH_TTL = 60 * 10; // 10 minutes
+const SESSION_TTL = 60 * 60 * 24 * 30;
+const OAUTH_TTL = 60 * 10;
 
 export const SESSION_COOKIE = "mg_session";
 export const OAUTH_COOKIE = "mg_oauth";
@@ -92,13 +84,6 @@ export function readSession(token: string | undefined): SessionUser | null {
   return verifyValue<SessionUser & { exp: number }>(token);
 }
 
-// Re-anchor a session cookie on the user directory.
-//
-// The cookie is signed and stateless, so on its own it stays good for its whole
-// 30-day life: an account deleted from the directory would keep its access
-// until the cookie aged out. Reading the row back on every request makes the
-// removal take effect immediately, and picks up a renamed display name or a new
-// avatar for free. Returns null when the session no longer names anyone.
 export function currentUser(session: SessionUser): SessionUser | null {
   const row = findUserBySub(session.sub);
   if (!row) return null;
@@ -113,9 +98,6 @@ export function currentUser(session: SessionUser): SessionUser | null {
   };
 }
 
-// ---- git token auth ---------------------------------------------------------
-
-// Parse an `Authorization: Basic ...` header into [user, pass].
 export function parseBasicAuth(
   header: string | undefined,
 ): [string, string] | null {
@@ -126,25 +108,11 @@ export function parseBasicAuth(
   return [decoded.slice(0, idx), decoded.slice(idx + 1)];
 }
 
-// What a set of Basic credentials is allowed to be.
-//
-// There is deliberately no instance-wide credential. Every token belongs to
-// exactly one account, so every push and every private read is attributable and
-// bounded by that account's permissions.
 export type GitAuth =
-  // A token minted at /tokens, acting as exactly one owner namespace.
   | { kind: "user"; owner: string }
-  // No credentials at all — the caller should send a Basic challenge.
   | { kind: "anonymous" }
-  // Credentials were presented and are not usable. `message` is written back to
-  // the git client, so it has to say what to fix.
   | { kind: "rejected"; message: string };
 
-// Resolve `Authorization: Basic ...` into what it may act as.
-//
-// The username half is no longer decorative: for an account token it must be
-// that account's owner slug. Requiring it means a push URL names who is pushing,
-// which is what makes `owner/repo` paths mean anything.
 export function authenticateGit(header: string | undefined): GitAuth {
   const basic = parseBasicAuth(header);
   if (!basic) return { kind: "anonymous" };
@@ -164,8 +132,6 @@ export function authenticateGit(header: string | undefined): GitAuth {
     };
   }
 
-  // Accept the slug itself, and also the raw username it was derived from, so
-  // `https://Alex.Kim:token@host/...` still works for owner `alex-kim`.
   const named =
     username !== "" &&
     (username === row.owner || ownerSlug(username) === row.owner);
@@ -181,13 +147,9 @@ export function authenticateGit(header: string | undefined): GitAuth {
   return { kind: "user", owner: row.owner };
 }
 
-// The owner slug a set of credentials acts as, or null when they don't act as
-// anybody. Repo-level authority lives in access.ts — this only says who.
 export function gitActor(auth: GitAuth): string | null {
   return auth.kind === "user" ? auth.owner : null;
 }
-
-// ---- OIDC (PocketID) --------------------------------------------------------
 
 let discovered: oidc.Configuration | null = null;
 
@@ -195,9 +157,6 @@ async function oidcConfig(): Promise<oidc.Configuration> {
   if (!discovered) {
     const { issuer, clientId, clientSecret, tokenAuth } = config.oidc;
 
-    // Token-endpoint auth method. Empty = openid-client's default. Set
-    // OIDC_TOKEN_AUTH=post for PocketID clients configured as client_secret_post,
-    // or =none for a public (PKCE-only) client with no secret.
     let clientAuth: oidc.ClientAuth | undefined;
     switch (tokenAuth) {
       case "post":
@@ -216,8 +175,6 @@ async function oidcConfig(): Promise<oidc.Configuration> {
     discovered = await oidc.discovery(
       new URL(issuer),
       clientId,
-      // When clientAuth is explicit it already carries the secret; otherwise
-      // pass the secret string so openid-client uses its default method.
       clientAuth ? undefined : clientSecret,
       clientAuth,
     );
@@ -225,8 +182,6 @@ async function oidcConfig(): Promise<oidc.Configuration> {
   return discovered;
 }
 
-// The issuer the discovery document actually advertises. Must match the `iss`
-// PocketID returns on the callback, or openid-client rejects the login.
 export async function oidcIssuer(): Promise<string> {
   const cfg = await oidcConfig();
   return cfg.serverMetadata().issuer;
@@ -234,11 +189,9 @@ export async function oidcIssuer(): Promise<string> {
 
 export interface AuthStart {
   redirectUrl: string;
-  txCookie: string; // signed cookie carrying PKCE verifier + state
+  txCookie: string;
 }
 
-// Begin the OIDC login: returns the URL to send the browser to and a signed
-// transaction cookie to set.
 export async function startLogin(): Promise<AuthStart> {
   const cfg = await oidcConfig();
   const verifier = oidc.randomPKCECodeVerifier();
@@ -259,8 +212,6 @@ export async function startLogin(): Promise<AuthStart> {
   };
 }
 
-// Complete the OIDC login from the callback request URL. Returns the identity,
-// or null if the transaction is invalid / the user isn't allowed.
 export async function finishLogin(
   currentUrl: string,
   txToken: string | undefined,
@@ -291,10 +242,6 @@ export async function finishLogin(
     picture: typeof claims.picture === "string" ? claims.picture : null,
   };
 
-  // Anyone PocketID vouches for is welcome: PocketID is the guest list, and
-  // keeping a second one here only ever gets out of step with it. Signing in
-  // earns a directory entry and with it a permanent owner slug — which is a
-  // namespace of their own, not access to anybody else's.
   const row = rememberUser(claimed);
   return { ...claimed, slug: row.slug };
 }

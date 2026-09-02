@@ -23,8 +23,6 @@ db.exec(`
   );
 `);
 
-// Added after the first release: tokens minted before this column existed are
-// backfilled from the user directory on first use (see verifyDbToken).
 if (!hasColumn("tokens", "owner")) {
   db.exec("ALTER TABLE tokens ADD COLUMN owner TEXT");
 }
@@ -44,15 +42,12 @@ export interface TokenRow {
 
 const COLUMNS = "id, label, owner, created_by, created_at, last_used";
 
-// Tokens belonging to one owner slug. There is deliberately no "list them all"
-// — a token label is the owner's business, not the whole instance's.
 export function listTokens(owner: string): TokenRow[] {
   return db
     .prepare(`SELECT ${COLUMNS} FROM tokens WHERE owner = ? ORDER BY created_at DESC`)
     .all(owner) as unknown as TokenRow[];
 }
 
-// Returns the plaintext token exactly once; only its hash is persisted.
 export function createToken(
   label: string,
   owner: string,
@@ -68,8 +63,6 @@ export function createToken(
   return plaintext;
 }
 
-// Revoke one of `owner`'s own tokens. Returns false if the id doesn't exist or
-// belongs to somebody else.
 export function revokeToken(id: string, owner: string): boolean {
   const row = db
     .prepare("SELECT owner FROM tokens WHERE id = ?")
@@ -79,8 +72,6 @@ export function revokeToken(id: string, owner: string): boolean {
   return true;
 }
 
-// Resolve a presented plaintext to the owner slug it acts as, or null if it
-// isn't a valid token. Bumps last_used as a side effect.
 export function verifyDbToken(plaintext: string): { owner: string | null } | null {
   const row = db
     .prepare("SELECT id, owner, created_by FROM tokens WHERE hash = ?")
@@ -89,8 +80,6 @@ export function verifyDbToken(plaintext: string): { owner: string | null } | nul
     | undefined;
   if (!row) return null;
 
-  // Pre-ownership token: adopt the slug of the account that created it, now
-  // that the user directory can answer that question.
   let owner = row.owner;
   if (!owner) {
     owner = slugForSub(row.created_by);

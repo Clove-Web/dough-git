@@ -7,10 +7,12 @@ import { config } from "./config.ts";
 import { classes as c } from "./styles/index.ts";
 import { escapeHtml, renderMarkdown, plainSummary } from "./markdown.ts";
 import { sessionSlug } from "./auth.ts";
+import { maskWebhook, mirrorHost, MIRROR_KINDS, type MirrorKind } from "./urls.ts";
 import type { SessionUser } from "./auth.ts";
 import type { CollaboratorRow } from "./access.ts";
 import type { TokenRow } from "./tokens.ts";
 import type { UserRow } from "./users.ts";
+import type { Settings } from "./settings.ts";
 import type {
   RepoSummary,
   Commit,
@@ -18,7 +20,10 @@ import type {
   CommitDetail,
   Readme,
   RefList,
+  TrashEntry,
+  MirrorLink,
 } from "./git.ts";
+import type { MirrorStatus } from "./mirror.ts";
 
 export const esc = escapeHtml;
 
@@ -27,7 +32,6 @@ function fmtDate(unix: number | null): string {
   return new Date(unix * 1000).toISOString().slice(0, 16).replace("T", " ");
 }
 
-// owner/name base path (URL-safe by construction — validated in git.ts).
 function base(owner: string, name: string): string {
   return `/${esc(owner)}/${esc(name)}`;
 }
@@ -36,23 +40,12 @@ function cloneUrl(owner: string, name: string): string {
   return `${config.baseUrl}/${owner}/${name}.git`;
 }
 
-// ---- revisions --------------------------------------------------------------
-
-// The `?h=` a link needs to stay on the current revision. The default branch
-// carries no query, so ordinary URLs stay clean and shareable.
-//
-// A branch name may contain characters that are structural in a URL (`/` in
-// `feature/thing`, `#`, `?`), so it is always percent-encoded — which also
-// makes it safe to drop straight into an HTML attribute.
 function revQuery(rev: string, head: string): string {
   return rev === head ? "" : `?h=${encodeURIComponent(rev)}`;
 }
 
-// A picker for the branch or tag being viewed. It is a plain GET form, so it
-// works with scripting off; /static/app.js only removes the extra click.
 function revPicker(refs: RefList, rev: string): string {
   const all = [...refs.branches, ...refs.tags];
-  // Nothing to switch between, or a detached commit id that isn't in the list.
   if (all.length < 2 && all.includes(rev)) return "";
   if (all.length === 0) return "";
 
@@ -67,8 +60,6 @@ function revPicker(refs: RefList, rev: string): string {
     return `<optgroup label="${label}">${items}</optgroup>`;
   };
 
-  // A revision reached by object id isn't in either list; show it so the
-  // control never displays something other than what is on screen.
   const detached = all.includes(rev)
     ? ""
     : `<option value="${esc(rev)}" selected>${esc(rev.slice(0, 10))}</option>`;
@@ -82,7 +73,6 @@ function revPicker(refs: RefList, rev: string): string {
     </form>`;
 }
 
-// Collapse a description to one clean line of attribute-safe text.
 function metaText(s: string, max = 200): string {
   const flat = s.replace(/\s+/g, " ").trim();
   const clipped =
@@ -90,7 +80,6 @@ function metaText(s: string, max = 200): string {
   return esc(clipped);
 }
 
-// The shared shape of "a person" across sessions and directory rows.
 interface Profile {
   name: string | null;
   username: string | null;
@@ -101,17 +90,6 @@ export function displayName(p: Profile & { sub?: string }): string {
   return p.name ?? p.username ?? p.sub ?? "user";
 }
 
-// Avatar from PocketID's `picture` claim, over a first-initial fallback. The
-// IDP may serve avatars only to signed-in browsers, so a failed image drops
-// itself and uncovers the initial rather than leaving a broken-image box.
-//
-// The drop is done by /static/app.js rather than an inline onerror handler,
-// because the Content-Security-Policy forbids inline script — that policy is
-// what stands behind markdown.ts if the renderer ever lets something through.
-//
-// The size comes from a class, not an inline `style` attribute: the CSP's
-// `style-src 'self'` drops inline styles too, which silently collapsed the
-// circle to the width of the fallback letter.
 function avatar(p: Profile, size: "sm" | "lg"): string {
   const initial = esc(displayName(p).trim().slice(0, 1).toUpperCase() || "?");
   const box = size === "lg" ? c.avatarLg : c.avatarSm;
@@ -125,27 +103,21 @@ function layout(opts: {
   title: string;
   user: SessionUser | null;
   body: string;
-  // Page description for <meta description> / social previews.
   description?: string;
-  // Site-absolute path of this page, for canonical + og:url.
   path?: string;
-  // Private repos and account pages shouldn't end up in search results.
   noindex?: boolean;
 }): string {
-  // Three zones: home on the left, who you are in the middle, settings right.
   const whoami = opts.user
     ? `<a class="${c.user}" href="/${esc(ownerOf(opts.user))}">${avatar(opts.user, "sm")}${esc(displayName(opts.user))}</a>`
     : "";
   const settings = opts.user
-    ? `<a class="${c.navLink}" href="/tokens">tokens</a>
+    ? `<a class="${c.navLink}" href="/settings">settings</a>
        <a class="${c.navLink}" href="/auth/logout">logout</a>`
     : `<a class="${c.navLink}" href="/auth/login">login</a>`;
 
   const description = metaText(opts.description || config.description);
   const url = opts.path ? esc(config.baseUrl + opts.path) : esc(config.baseUrl);
   const icon = esc(config.favicon);
-  // Same image as the favicon, doubling as the header mark. Decorative: the
-  // title text right next to it already names the site.
   const logo = config.favicon
     ? `<img class="${c.siteLogo}" src="${icon}" alt="" width="24" height="24">`
     : "";
@@ -191,12 +163,6 @@ ${opts.body}
 </html>`;
 }
 
-// The repo table shared by the front page and the profile pages. `showOwner`
-// is off on a profile, where every row has the same owner as the heading.
-//
-// `sharedSlugs` holds the `owner/name` of repos this viewer only sees because
-// somebody invited them. Marking those is the difference between "my repos" and
-// "repos I can reach", which is otherwise invisible.
 function repoTable(
   repos: RepoSummary[],
   opts: {
@@ -256,8 +222,6 @@ ${createForm}
   return layout({ title: config.title, user, body, path: "/" });
 }
 
-// A deliberately small profile: who this is, and what they own. Anything more
-// (activity feeds, bios, follower counts) is a different kind of site.
 export function profilePage(opts: {
   owner: string;
   profile: UserRow | null;
@@ -266,14 +230,10 @@ export function profilePage(opts: {
 }): string {
   const p = opts.profile;
   const name = p ? displayName(p) : opts.owner;
-  // The slug is the handle; only mention the upstream username when it says
-  // something the slug doesn't (a rename, or characters the slug dropped).
   const handle = p?.username && p.username !== p.slug ? p.username : null;
 
   const known = p
     ? `<p class="${c.repoDesc}">@${esc(p.slug)}${handle ? ` &middot; ${esc(handle)}` : ""} &middot; joined ${fmtDate(p.created_at).slice(0, 10)}</p>`
-    // Repos can outlive their account (or arrive by push before anyone logs
-    // in), so an owner directory with no user row still gets a page.
     : `<p class="${c.repoDesc}">@${esc(opts.owner)} &middot; no account on this instance</p>`;
 
   const body = `    <section class="${c.profileHead}">
@@ -292,20 +252,14 @@ export function profilePage(opts: {
     body,
     description: `${name} (@${opts.owner}) on ${config.title}.`,
     path: `/${opts.owner}`,
-    // Someone with nothing public shouldn't be indexed into existence by their
-    // presence on a mostly-private instance.
     noindex: !opts.repos.some((r) => r.isPublic),
   });
 }
 
-// The owner segment this user's repos live under. Assigned once at first login
-// and carried in the session; see users.ts for why it can't be re-derived.
 export function ownerOf(user: SessionUser): string {
   return sessionSlug(user);
 }
 
-// The three repo tabs. `q` is the `?h=` suffix, so switching tabs keeps you on
-// the branch you were reading.
 function repoNav(
   owner: string,
   name: string,
@@ -353,29 +307,26 @@ export function summaryPage(opts: {
   empty: boolean;
   readme: Readme | null;
   description: string;
-  // The `description` file as stored, for the edit form. "" means unset.
   rawDescription: string;
-  // True when the viewer may push: the owner, or a write collaborator.
   canPush: boolean;
-  // The grant list, but only when the viewer is the owner — nobody else is
-  // shown who else has access.
   collaborators: CollaboratorRow[] | null;
   refs: RefList;
   rev: string;
   user: SessionUser | null;
+  links: MirrorLink[];
+  mirrorStatuses: Map<string, MirrorStatus>;
+  localSha: string | null;
 }): string {
   const title = `${opts.owner}/${opts.name}`;
   const empty = opts.empty;
   const q = revQuery(opts.rev, opts.refs.head);
-  // Whoever is pushing authenticates as themselves, not as the repo's owner, so
-  // the username in the hint is the reader's own slug.
   const pusher = opts.user ? ownerOf(opts.user) : opts.owner;
   const pushHint =
     empty && opts.canPush
       ? `    <section class="${c.cloneBox}">
       <p><strong>This repository is empty.</strong> Push to get started:</p>
       <code>git remote add mirror ${esc(cloneUrl(opts.owner, opts.name))}<br>git push --mirror mirror</code>
-      <p class="${c.repoDesc}">When prompted, the <strong>username</strong> is <code>${esc(pusher)}</code> and the <strong>password</strong> is a token from <a href="/tokens">/tokens</a>.</p>
+      <p class="${c.repoDesc}">When prompted, the <strong>username</strong> is <code>${esc(pusher)}</code> and the <strong>password</strong> is a token from <a href="/settings/tokens">settings</a>.</p>
     </section>`
       : empty
         ? `    <section class="${c.cloneBox}">
@@ -383,7 +334,6 @@ export function summaryPage(opts: {
     </section>`
         : "";
 
-  // An empty repo has nothing to look for, so it only gets the push hint above.
   const readmeSection = empty
     ? ""
     : opts.readme
@@ -394,9 +344,6 @@ ${renderMarkdown(opts.readme.text)}
       : `    <h2 class="${c.sectionTitle}">readme</h2>
     <p class="${c.empty}">No ReadMe was found, commit one to add a summary</p>`;
 
-  // Only the owner manages a repo — matching what the git transport enforces.
-  // A write collaborator can push, but can't publish the repo, delete it, or
-  // hand access to anybody else.
   const isOwner = opts.collaborators !== null;
   const manage = isOwner
     ? `    <h2 class="${c.sectionTitle}">manage</h2>
@@ -412,8 +359,6 @@ ${renderMarkdown(opts.readme.text)}
 ${collaboratorSection(opts.owner, opts.name, opts.collaborators ?? [])}`
     : "";
 
-  // Editing the blurb needs push rights, not ownership: it is the same thing a
-  // collaborator could already change by committing a README.
   const descriptionForm = opts.canPush
     ? `    <form method="post" action="${base(opts.owner, opts.name)}/description" class="${c.cloneBox} ${c.formRow}">
       <label class="${c.cloneLabel}" for="repo-description">description</label>
@@ -435,6 +380,15 @@ ${descriptionForm}
       <code>git clone ${esc(cloneUrl(opts.owner, opts.name))}</code>
     </section>
 ${pushHint}
+${mirrorSection(
+  opts.owner,
+  opts.name,
+  opts.links,
+  opts.mirrorStatuses,
+  opts.localSha,
+  isOwner,
+  opts.canPush,
+)}
 ${readmeSection}
 ${manage}`;
   return layout({
@@ -447,8 +401,161 @@ ${manage}`;
   });
 }
 
-// The owner's view of who else can reach this repo. Read access is what makes a
-// private repo visible at all; write access additionally allows a push.
+function mirrorSection(
+  owner: string,
+  name: string,
+  links: MirrorLink[],
+  statuses: Map<string, MirrorStatus>,
+  localSha: string | null,
+  isOwner: boolean,
+  canCheck: boolean,
+): string {
+  if (links.length === 0 && !isOwner) return "";
+
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  const rows = links
+    .map((link) => {
+      const status = statuses.get(link.kind) ?? null;
+      const view = describeMirror(link, status, nowSec);
+      return `      <div class="${c.mirrorRow}">
+        <span class="${c.mirrorKind}"><a href="${esc(link.url)}" rel="nofollow noopener noreferrer">${esc(link.kind)}</a></span>
+        <span class="${view.cls}">${esc(view.label)}</span>
+        <span class="${c.commitHash}">${esc(view.sha)}</span>
+        <span class="${c.repoDesc}">${esc(view.detail)}</span>
+      </div>${view.note ? `\n      <p class="${view.noteCls}">${esc(view.note)}</p>` : ""}`;
+    })
+    .join("\n");
+
+  const local = localSha
+    ? `      <div class="${c.mirrorRow}">
+        <span class="${c.mirrorKind}">local</span>
+        <span class="${c.statusMuted}">this repository</span>
+        <span class="${c.commitHash}">${esc(localSha.slice(0, 7))}</span>
+        <span></span>
+      </div>`
+    : "";
+
+  const checkButton =
+    canCheck && links.some((l) => !l.isPrivate)
+      ? `      <form method="post" action="${base(owner, name)}/mirrors/check">
+        <button type="submit">check now</button>
+      </form>`
+      : "";
+
+  const body =
+    links.length > 0
+      ? `    <section class="${c.cloneBox}">
+${rows}
+${local}
+${checkButton}
+    </section>`
+      : `    <p class="${c.empty}">No mirrors configured.</p>`;
+
+  const field = (kind: MirrorKind) => {
+    const existing = links.find((l) => l.kind === kind);
+    return `      <div class="${c.formRow}">
+        <label class="${c.cloneLabel}" for="mirror-${kind}">${kind}</label>
+        <input id="mirror-${kind}" class="${c.grow}" type="url" name="${kind}"
+          value="${esc(existing?.url ?? "")}" placeholder="https://${esc(mirrorHost(kind))}/user/repo">
+        <label><input type="checkbox" name="${kind}_private"${existing?.isPrivate ? " checked" : ""}> private</label>
+      </div>`;
+  };
+
+  const form = isOwner
+    ? `    <form method="post" action="${base(owner, name)}/mirrors" class="${c.cloneBox}">
+${MIRROR_KINDS.map(field).join("\n")}
+      <p class="${c.repoDesc}">Only ${esc(MIRROR_KINDS.map(mirrorHost).join(" and "))} are accepted.
+      Mark a mirror <em>private</em> to skip status checks — they are anonymous, so a private
+      mirror would otherwise always look unreachable. Clear a field to remove it.</p>
+      <button type="submit">save mirrors</button>
+    </form>`
+    : "";
+
+  return `    <h2 class="${c.sectionTitle}">external mirrors</h2>
+${body}
+${form}`;
+}
+
+function describeMirror(
+  link: MirrorLink,
+  status: MirrorStatus | null,
+  nowSec: number,
+): {
+  label: string;
+  cls: string;
+  sha: string;
+  detail: string;
+  note: string;
+  noteCls: string;
+} {
+  const blank = { note: "", noteCls: c.repoDesc };
+
+  if (link.isPrivate) {
+    return {
+      ...blank,
+      label: "🔒 Not checked (private)",
+      cls: c.statusMuted,
+      sha: "",
+      detail: "status checks are anonymous",
+    };
+  }
+  if (!status || (!status.state && !status.error)) {
+    return { ...blank, label: "— not checked yet", cls: c.statusMuted, sha: "", detail: "" };
+  }
+
+  const LABELS: Record<string, { label: string; cls: string }> = {
+    synced: { label: "✓ Up to date", cls: c.statusGood },
+    ahead: { label: "↑ Mirror behind", cls: c.statusWarn },
+    behind: { label: "↓ Local behind", cls: c.statusWarn },
+    diverged: { label: "⚠ Diverged", cls: c.statusBad },
+    out_of_sync: { label: "⚠ Out of sync", cls: c.statusBad },
+    denied: { label: "🔒 Private or missing", cls: c.statusWarn },
+    missing: { label: "✗ Repository missing", cls: c.statusBad },
+  };
+
+  if (status.error) {
+    const known = status.state ? LABELS[status.state] : undefined;
+    const stale = status.okAt !== null && nowSec - status.okAt > 24 * 3600;
+    return {
+      label: known ? known.label : "? Unavailable",
+      cls: known ? c.statusMuted : c.statusBad,
+      sha: status.remoteSha ? status.remoteSha.slice(0, 7) : "",
+      detail: status.okAt ? `last verified ${ago(nowSec - status.okAt)} ago` : "never verified",
+      note:
+        `${link.kind}: check failed ${ago(nowSec - status.checkedAt)} ago (${status.error})` +
+        (status.okAt
+          ? stale
+            ? ` — NOT VERIFIED for ${ago(nowSec - status.okAt)}`
+            : ` — showing last verified state from ${ago(nowSec - status.okAt)} ago`
+          : ""),
+      noteCls: stale || !status.okAt ? c.statusBad : c.statusWarn,
+    };
+  }
+
+  const known = status.state ? LABELS[status.state] : undefined;
+  const stale = status.okAt !== null && nowSec - status.okAt > 24 * 3600;
+  return {
+    label: known?.label ?? "? Unavailable",
+    cls: known?.cls ?? c.statusBad,
+    sha: status.remoteSha ? status.remoteSha.slice(0, 7) : "",
+    detail: [status.detail, status.okAt ? `checked ${ago(nowSec - status.okAt)} ago` : ""]
+      .filter(Boolean)
+      .join(" · "),
+    note: stale
+      ? `${link.kind}: not verified for ${ago(nowSec - (status.okAt ?? nowSec))}`
+      : "",
+    noteCls: c.statusBad,
+  };
+}
+
+function ago(seconds: number): string {
+  if (seconds < 90) return `${Math.max(0, Math.round(seconds))}s`;
+  if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
+  if (seconds < 172800) return `${Math.round(seconds / 3600)}h`;
+  return `${Math.round(seconds / 86400)}d`;
+}
+
 function collaboratorSection(
   owner: string,
   name: string,
@@ -494,8 +601,6 @@ ${rows || `        <tr><td colspan="4" class="${c.empty}">nobody else has access
     </table>`;
 }
 
-// Best available one-line description of a repo: git's own `description` file,
-// else the opening prose of the README, else a generic line.
 export function repoDescription(opts: {
   owner: string;
   name: string;
@@ -544,8 +649,6 @@ export function treePage(opts: {
   const q = revQuery(opts.rev, opts.refs.head);
   const crumb = opts.path ? ` /${esc(opts.path)}` : "";
 
-  // A link back up one level, so a deep tree isn't a dead end without the
-  // browser's back button.
   const parent = opts.path
     ? `      <tr class="${c.repoRow}">
         <td class="${c.treeMode}"></td>
@@ -586,7 +689,6 @@ ${[parent, rows].filter(Boolean).join("\n") || `        <tr><td class="${c.empty
   });
 }
 
-// Bytes as something a person can read at a glance.
 function fmtBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
@@ -634,8 +736,6 @@ export function commitPage(opts: {
   user: SessionUser | null;
 }): string {
   const cm = opts.commit;
-  // A commit is reached from some branch; carrying that along keeps the tabs
-  // pointing back where the reader came from.
   const q = `?h=${encodeURIComponent(opts.rev)}`;
   const body = `    <h1 class="${c.pageTitle}">${esc(cm.subject)}</h1>
 ${repoNav(opts.owner, opts.name, "log", q)}
@@ -656,6 +756,16 @@ ${repoNav(opts.owner, opts.name, "log", q)}
   });
 }
 
+function settingsNav(active: string): string {
+  const tab = (id: string, label: string, href: string) =>
+    `<a class="${c.tab}${id === active ? " " + c.tabActive : ""}" href="${href}">${label}</a>`;
+  return `    <nav class="${c.repoTabs}">
+      ${tab("account", "account", "/settings")}
+      ${tab("tokens", "tokens", "/settings/tokens")}
+      ${tab("deleted", "recently deleted", "/settings/deleted")}
+    </nav>`;
+}
+
 export function tokensPage(opts: {
   tokens: TokenRow[];
   user: SessionUser | null;
@@ -669,7 +779,7 @@ export function tokensPage(opts: {
         <td class="${c.commitDate}">${fmtDate(t.created_at)}</td>
         <td class="${c.commitDate}">${t.last_used ? fmtDate(t.last_used) : "never"}</td>
         <td>
-          <form method="post" action="/tokens/${esc(t.id)}/revoke">
+          <form method="post" action="/settings/tokens/${esc(t.id)}/revoke">
             <button type="submit">revoke</button>
           </form>
         </td>
@@ -687,12 +797,14 @@ export function tokensPage(opts: {
     </section>`
     : "";
 
-  const body = `    <h1 class="${c.pageTitle}">access tokens</h1>
+  const body = `    <h1 class="${c.pageTitle}">settings</h1>
+${settingsNav("tokens")}
+    <h2 class="${c.sectionTitle}">access tokens</h2>
     <p class="${c.repoDesc}">These tokens act as <code>${esc(authUser)}</code>: use that as the git
     <strong>username</strong> and the token as the <strong>password</strong>. They can only push to
     repositories under <code>${esc(authUser)}/</code>.</p>
 ${created}
-    <form method="post" action="/tokens" class="${c.cloneBox}">
+    <form method="post" action="/settings/tokens" class="${c.cloneBox}">
       <label class="${c.cloneLabel}">label</label>
       <input type="text" name="label" placeholder="laptop, backup cron, ...">
       <button type="submit">create token</button>
@@ -710,6 +822,159 @@ ${rows || `        <tr><td colspan="5" class="${c.empty}">no tokens yet</td></tr
     user: opts.user,
     body,
     description: "Manage git access tokens.",
+    noindex: true,
+  });
+}
+
+export function settingsPage(opts: {
+  user: SessionUser | null;
+  settings: Settings;
+  saved?: string | null;
+}): string {
+  const s = opts.settings;
+  const on = (v: boolean) => (v ? " checked" : "");
+
+  const webhookState = s.discordWebhook
+    ? `      <p class="${c.repoDesc}">configured &middot; <code>${esc(maskWebhook(s.discordWebhook))}</code></p>`
+    : `      <p class="${c.empty}">not configured — repository events are not announced anywhere.</p>`;
+
+  const webhookError =
+    s.discordWebhook && s.webhookError
+      ? `      <p class="${c.statusBad}">last delivery failed${
+          s.webhookErrorAt ? ` at ${fmtDate(s.webhookErrorAt)}` : ""
+        }: ${esc(s.webhookError)}</p>`
+      : "";
+
+  const clear = s.discordWebhook
+    ? `      <form method="post" action="/settings/discord" data-confirm="Remove the Discord webhook? Events will stop being announced.">
+        <input type="hidden" name="url" value="">
+        <button type="submit">remove webhook</button>
+      </form>`
+    : "";
+
+  const body = `    <h1 class="${c.pageTitle}">settings</h1>
+${settingsNav("account")}
+${opts.saved ? `    <p class="${c.statusGood}">${esc(opts.saved)}</p>` : ""}
+
+    <h2 class="${c.sectionTitle}">discord notifications</h2>
+    <p class="${c.repoDesc}">Announces repositories being created and deleted, and commits being
+    pushed. Only repositories you own are announced, and only to this webhook.</p>
+    <section class="${c.cloneBox}">
+${webhookState}
+${webhookError}
+      <form method="post" action="/settings/discord" class="${c.formRow}">
+        <label class="${c.cloneLabel}" for="discord-url">webhook</label>
+        <input id="discord-url" class="${c.grow}" type="url" name="url" autocomplete="off"
+          placeholder="https://discord.com/api/webhooks/…">
+        <button type="submit">save</button>
+      </form>
+${clear}
+    </section>
+
+    <h2 class="${c.sectionTitle}">preferences</h2>
+    <form method="post" action="/settings/prefs" class="${c.cloneBox}">
+      <p><label><input type="checkbox" name="default_private"${on(s.defaultPrivate)}>
+        New repositories start private</label></p>
+      <p><label><input type="checkbox" name="discord_private"${on(s.discordPrivate)}>
+        Announce activity on private repositories</label>
+        <br><span class="${c.repoDesc}">Off by default: commit subjects and repository names
+        would otherwise leave a private repo for a Discord channel.</span></p>
+      <p><label><input type="checkbox" name="mirror_auto"${on(s.mirrorAuto)}>
+        Check mirror status automatically when viewing a repository</label>
+        <br><span class="${c.repoDesc}">Off means mirrors are only checked when you press
+        <em>check now</em>.</span></p>
+      <button type="submit">save preferences</button>
+    </form>
+
+    <h2 class="${c.sectionTitle}">account</h2>
+    <p class="${c.repoDesc}">Your name and avatar come from PocketID and refresh on each sign-in,
+    so there is nothing to edit here. Your owner namespace is
+    <code>${esc(opts.user ? ownerOf(opts.user) : "")}</code> and never changes.</p>`;
+
+  return layout({
+    title: "settings",
+    user: opts.user,
+    body,
+    description: "Account settings.",
+    noindex: true,
+  });
+}
+
+export function deletedPage(opts: {
+  user: SessionUser | null;
+  entries: TrashEntry[];
+  retentionDays: number;
+}): string {
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  const rows = opts.entries
+    .map((e) => {
+      const remaining =
+        opts.retentionDays > 0
+          ? Math.ceil(
+              (e.deletedAt + opts.retentionDays * 86400 - nowSec) / 86400,
+            )
+          : null;
+      const life =
+        remaining === null
+          ? `<span class="${c.statusMuted}">kept until purged</span>`
+          : remaining <= 0
+            ? `<span class="${c.statusBad}">purged on next visit</span>`
+            : remaining <= 3
+              ? `<span class="${c.statusBad}">${remaining}d left</span>`
+              : `<span class="${c.statusMuted}">${remaining}d left</span>`;
+
+      const note = e.degraded
+        ? `<br><span class="${c.statusWarn}">recovery metadata unreadable — restorable, but collaborators will need re-adding</span>`
+        : e.grants.length
+          ? `<br><span class="${c.repoDesc}">${e.grants.length} collaborator${e.grants.length === 1 ? "" : "s"} will be restored</span>`
+          : "";
+
+      return `      <tr>
+        <td class="${c.repoName}">${esc(e.name)}${note}</td>
+        <td class="${c.commitDate}">${fmtDate(e.deletedAt)}</td>
+        <td class="${c.repoDesc}">${esc(e.deletedBy)}</td>
+        <td>${life}</td>
+        <td>
+          <form method="post" action="/settings/deleted/restore">
+            <input type="hidden" name="entry" value="${esc(e.entry)}">
+            <button type="submit">restore</button>
+          </form>
+        </td>
+        <td>
+          <form method="post" action="/settings/deleted/purge" data-confirm="Permanently delete ${esc(e.name)}? This destroys the git data and cannot be undone.">
+            <input type="hidden" name="entry" value="${esc(e.entry)}">
+            <button type="submit">delete permanently</button>
+          </form>
+        </td>
+      </tr>`;
+    })
+    .join("\n");
+
+  const retention =
+    opts.retentionDays > 0
+      ? `Deleted repositories are kept for ${opts.retentionDays} days, then purged the next time you open this page.`
+      : `Deleted repositories are kept indefinitely — nothing is purged unless you do it here.`;
+
+  const body = `    <h1 class="${c.pageTitle}">settings</h1>
+${settingsNav("deleted")}
+    <h2 class="${c.sectionTitle}">recently deleted</h2>
+    <p class="${c.repoDesc}">${esc(retention)} A deleted repository keeps its name reserved, so
+    nothing new can take it until it is restored or purged.</p>
+    <table>
+      <thead>
+        <tr><th>repository</th><th>deleted</th><th>by</th><th>retention</th><th></th><th></th></tr>
+      </thead>
+      <tbody>
+${rows || `        <tr><td colspan="6" class="${c.empty}">nothing deleted</td></tr>`}
+      </tbody>
+    </table>`;
+
+  return layout({
+    title: "recently deleted",
+    user: opts.user,
+    body,
+    description: "Recover deleted repositories.",
     noindex: true,
   });
 }
