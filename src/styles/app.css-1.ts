@@ -378,8 +378,7 @@ globalStyle(`${readme} blockquote`, {
   color: vars.textMuted,
 });
 
-// GitHub-style alerts. One accent colour per kind drives the left border,
-// the title text, and the icon fill.
+// GitHub-style alerts: one accent colour per kind.
 const alertColor = {
   note: "#4493f8",
   tip: "#3fb950",
@@ -463,8 +462,7 @@ globalStyle(`${readme} th[data-align="right"], ${readme} td[data-align="right"]`
 
 globalStyle(`${readme} del`, { color: vars.textDim });
 
-// Inline pixel icons (see src/icons.ts). crispEdges keeps the pixel grid
-// sharp at any size; currentColor lets a parent's colour token drive the fill.
+// Inline pixel icons: crispEdges keeps the pixel grid sharp at any size.
 globalStyle(".icon", {
   display: "inline-block",
   verticalAlign: "middle",

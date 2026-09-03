@@ -63,6 +63,63 @@ check("paragraph", has("just words", "<p>just words</p>"));
 check("horizontal rule", has("---\n", "<hr>"));
 check("blockquote", has("> quoted", "<blockquote>"));
 check(
+  "a plain blockquote is not treated as an alert",
+  has("> quoted", "<blockquote>") && lacks("> quoted", "md-alert"),
+);
+
+check(
+  "note alert renders as a titled alert, not a blockquote",
+  has("> [!NOTE]\n> Heads up.", 'class="md-alert md-alert-note"') &&
+    lacks("> [!NOTE]\n> Heads up.", "<blockquote>"),
+);
+check(
+  "note alert carries its title and body",
+  has("> [!NOTE]\n> Heads up.", ">Note</p>") &&
+    has("> [!NOTE]\n> Heads up.", "Heads up."),
+);
+check(
+  "note alert includes an inline icon",
+  has("> [!NOTE]\n> Heads up.", 'class="md-alert-icon"'),
+);
+check(
+  "tip alert",
+  has("> [!TIP]\n> Handy.", 'class="md-alert md-alert-tip"'),
+);
+check(
+  "important alert",
+  has("> [!IMPORTANT]\n> Read this.", 'class="md-alert md-alert-important"'),
+);
+check(
+  "warning alert",
+  has("> [!WARNING]\n> Careful.", 'class="md-alert md-alert-warning"'),
+);
+check(
+  "caution alert",
+  has("> [!CAUTION]\n> Danger.", 'class="md-alert md-alert-caution"'),
+);
+check(
+  "alert marker is case-insensitive",
+  has("> [!note]\n> lower.", 'class="md-alert md-alert-note"'),
+);
+check(
+  "an unknown marker stays a plain blockquote",
+  has("> [!HINT]\n> nope.", "<blockquote>") &&
+    lacks("> [!HINT]\n> nope.", "md-alert"),
+);
+check(
+  "a marker with trailing text is not an alert",
+  lacks("> [!NOTE] inline text", "md-alert"),
+);
+check(
+  "alert body renders markdown",
+  has("> [!NOTE]\n> Has **bold** text.", "<strong>bold</strong>"),
+);
+check(
+  "alert markup can't be forged from README content",
+  lacks("plain [!NOTE] not in a quote", "md-alert"),
+);
+
+check(
   "fenced code keeps its content verbatim",
   has("```js\nconst a = 1;\n```", "const a = 1;"),
 );
