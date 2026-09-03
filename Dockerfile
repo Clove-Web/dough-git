@@ -3,7 +3,7 @@
 # --- build stage -------------------------------------------------------------
 # Compiles Vanilla Extract (.css.ts) + bundles the server with esbuild.
 # Uses npm because the VE build tooling is Node-based.
-FROM node:22-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
@@ -21,7 +21,7 @@ RUN npm run build
 # --- runtime stage -----------------------------------------------------------
 # Slim Node image + git (the app shells out to git upload-pack / receive-pack
 # and git log for the viewer).
-FROM node:22-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
