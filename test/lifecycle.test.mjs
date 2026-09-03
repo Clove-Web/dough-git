@@ -42,6 +42,7 @@ const {
   restoreFromTrash,
   purgeFromTrash,
   purgeExpired,
+  purgeAllExpired,
   DELETED_META,
 } = await import("../src/git.ts");
 const { setCollaborator, listCollaborators, collaboratorLevel } = await import(
@@ -182,6 +183,27 @@ const purged = await purgeExpired("alice");
 check("the expired entry was purged", purged.some((e) => e.name === "ancient"));
 check("the fresh entry was kept", (await listTrash("alice")).some((e) => e.name === "recent"));
 check("expired directory really gone", !existsSync(join(trashOf("alice"), oldEntry.entry)));
+
+// purgeExpired only ever sweeps the owner being looked at, so an owner who
+// never opens their own Recently Deleted page would keep expired copies for
+// ever. purgeAllExpired is what makes the retention window a real one.
+const bob = { owner: "bob", name: "forgotten" };
+await seed(bob);
+const bobEntry = await trashIt(bob, Math.floor(Date.now() / 1000) - 40 * 86400);
+const bobFresh = { owner: "bob", name: "kept" };
+await seed(bobFresh);
+await trashIt(bobFresh);
+
+const sweptAll = await purgeAllExpired();
+check(
+  "the sweep reaches an owner nobody visited",
+  sweptAll.some((e) => e.owner === "bob" && e.name === "forgotten"),
+);
+check("...and really removes it", !existsSync(join(trashOf("bob"), bobEntry.entry)));
+check(
+  "...while leaving a fresh entry alone",
+  (await listTrash("bob")).some((e) => e.name === "kept"),
+);
 
 console.log("\n-- degraded entry (metadata unreadable) --");
 const broken = { owner: "alice", name: "broken" };

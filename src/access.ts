@@ -25,6 +25,11 @@ db.exec(`
   );
 `);
 
+// The primary key answers "who may touch this repo", which is the question the
+// transport asks. sharedWith() asks the mirror image — "which repos may this
+// person touch" — on every repo listing, and that one needs its own index.
+db.exec("CREATE INDEX IF NOT EXISTS collaborators_slug ON collaborators (slug)");
+
 export type Level = "read" | "write";
 
 export type Access = "none" | "read" | "write";

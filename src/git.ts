@@ -49,6 +49,38 @@ function safeSegment(s: string): boolean {
   return SEGMENT.test(s) && !s.startsWith(".") && !s.includes("..");
 }
 
+// The "+" namespace.
+//
+// A leading "+" marks a name the forge owns rather than the user. It buys two
+// things at once: route segments like /:owner/+repos can never collide with a
+// real repository, and the profile repo cannot be created by accident or
+// squatted by someone typing a plausible name.
+//
+// Exactly one "+" name is a real repository — PROFILE_REPO, whose README is
+// rendered on its owner's profile page. Every other "+" name is refused
+// everywhere a name is accepted, so `git push` cannot conjure one and neither
+// can the create form. "+" is not allowed anywhere else in a name, which keeps
+// the prefix a namespace marker rather than a character.
+export const PROFILE_REPO = "+dough";
+
+// The owner-level repositories page lives at /<owner>/+repos. It is a route,
+// not a repository, and it is deliberately spelled with the reserved prefix:
+// safeName() refuses every "+" name but PROFILE_REPO, so no repository can ever
+// exist that would answer to this URL.
+export const PROFILE_REPOS_PATH = "+repos";
+
+const NAME_SEGMENT = /^[A-Za-z0-9._+-]+$/;
+
+function safeName(s: string): boolean {
+  if (!NAME_SEGMENT.test(s) || s.startsWith(".") || s.includes("..")) return false;
+  if (s.startsWith("+")) return s === PROFILE_REPO;
+  return !s.includes("+");
+}
+
+export function isProfileRepo(name: string): boolean {
+  return name === PROFILE_REPO;
+}
+
 const OBJECT_ID = /^[0-9a-fA-F]{4,64}$/;
 
 export function safeObjectId(sha: string): string | null {
@@ -57,7 +89,7 @@ export function safeObjectId(sha: string): string | null {
 
 export function safeRef(owner: string, nameRaw: string): RepoRef | null {
   const name = nameRaw.replace(/\.git$/, "");
-  if (!safeSegment(owner) || !safeSegment(name)) return null;
+  if (!safeSegment(owner) || !safeName(name)) return null;
   return { owner, name };
 }
 
@@ -144,7 +176,7 @@ const TRASH_DIR = ".trash";
 
 export const DELETED_META = "dough-deleted.json";
 
-const TRASH_ENTRY = /^[A-Za-z0-9._-]+\.\d+\.git$/;
+const TRASH_ENTRY = /^\+?[A-Za-z0-9._-]+\.\d+\.git$/;
 
 export interface DeletedGrant {
   slug: string;
@@ -184,6 +216,7 @@ function trashEntryDir(owner: string, entry: string): string | null {
     return null;
   }
   if (!TRASH_ENTRY.test(entry)) return null;
+  if (!safeName(nameFromEntry(entry))) return null;
 
   const root = resolve(trashRoot());
   const full = resolve(join(root, owner, entry));
@@ -250,7 +283,7 @@ export async function listTrash(owner: string): Promise<TrashEntry[]> {
       if (
         parsed &&
         typeof parsed.name === "string" &&
-        safeSegment(parsed.name) &&
+        safeName(parsed.name) &&
         parsed.owner === owner
       ) {
         meta = parsed as DeletedMeta;
@@ -337,6 +370,30 @@ export async function purgeExpired(owner: string): Promise<TrashEntry[]> {
   return purged;
 }
 
+// Retention across every owner.
+//
+// purgeExpired() only sweeps the owner whose page is being rendered, which
+// makes MINIGIT_TRASH_DAYS a promise that is only kept for people who happen to
+// visit. This is the sweep the server runs on a timer so the retention window
+// means what it says.
+export async function purgeAllExpired(): Promise<TrashEntry[]> {
+  if (config.trashDays <= 0) return [];
+
+  let owners: string[];
+  try {
+    owners = await readdir(trashRoot());
+  } catch {
+    return [];
+  }
+
+  const purged: TrashEntry[] = [];
+  for (const owner of owners) {
+    if (!safeSegment(owner)) continue;
+    purged.push(...(await purgeExpired(owner)));
+  }
+  return purged;
+}
+
 export async function isRepoPublic(ref: RepoRef): Promise<boolean> {
   try {
     await access(join(refDir(ref), config.publicMarker));
@@ -380,7 +437,9 @@ export async function listRepos(): Promise<RepoSummary[]> {
     }
     for (const entry of entries) {
       if (!entry.endsWith(".git")) continue;
-      const ref: RepoRef = { owner, name: entry.replace(/\.git$/, "") };
+      const name = entry.replace(/\.git$/, "");
+      if (!safeName(name)) continue;
+      const ref: RepoRef = { owner, name };
       const dir = refDir(ref);
       try {
         repos.push({
@@ -861,6 +920,17 @@ export async function readme(ref: RepoRef, refspec: string): Promise<Readme | nu
   const content = await blob(ref, refspec, hit.name);
   if (!content || content.binary) return null;
   return { path: hit.name, text: content.text };
+}
+
+// The README at a repo's default branch, for callers that want it without
+// caring which revision they are on. tree() already swallows a bad refspec and
+// returns nothing, so an empty repo, a dangling HEAD and a repo with no README
+// all arrive here as the same null.
+export async function headReadme(ref: RepoRef): Promise<Readme | null> {
+  const refs = await listRefs(ref);
+  if (refs.branches.length === 0) return null;
+  const rev = refs.branches.includes(refs.head) ? refs.head : refs.branches[0]!;
+  return readme(ref, rev);
 }
 
 export async function description(ref: RepoRef): Promise<string> {

@@ -14,6 +14,7 @@ import type { CollaboratorRow } from "./access.ts";
 import type { TokenRow } from "./tokens.ts";
 import type { UserRow } from "./users.ts";
 import type { Settings } from "./settings.ts";
+import { PROFILE_REPO, PROFILE_REPOS_PATH } from "./git.ts";
 import type {
   RepoSummary,
   Commit,
@@ -223,36 +224,119 @@ ${createForm}
   return layout({ title: config.title, user, body, path: "/" });
 }
 
+// How many repositories the profile page shows before deferring to /+repos.
+const PROFILE_PREVIEW = 6;
+
+function ownerName(owner: string, profile: UserRow | null): string {
+  return profile ? displayName(profile) : owner;
+}
+
+function ownerHead(owner: string, profile: UserRow | null): string {
+  const handle =
+    profile?.username && profile.username !== profile.slug
+      ? profile.username
+      : null;
+
+  const known = profile
+    ? `<p class="${c.repoDesc}">@${esc(profile.slug)}${handle ? ` &middot; ${esc(handle)}` : ""} &middot; joined ${fmtDate(profile.created_at).slice(0, 10)}</p>`
+    : `<p class="${c.repoDesc}">@${esc(owner)} &middot; no account on this instance</p>`;
+
+  return `    <section class="${c.profileHead}">
+      ${avatar(profile ?? { name: owner, username: null, picture: null }, "lg")}
+      <div>
+        <h1 class="${c.profileName}">${esc(ownerName(owner, profile))}</h1>
+        ${known}
+      </div>
+    </section>`;
+}
+
+// Same shape as the per-repo tabs, so an owner's pages navigate like a repo's.
+function ownerTabs(owner: string, active: "profile" | "repos"): string {
+  const tab = (id: string, label: string, glyph: string, href: string) =>
+    `<a class="${c.tab}${id === active ? " " + c.tabActive : ""}" href="${href}">${icon(glyph)}${label}</a>`;
+  return `    <nav class="${c.repoTabs}">
+      ${tab("profile", "profile", "user", `/${esc(owner)}`)}
+      ${tab("repos", "repositories", "git-branch", `/${esc(owner)}/${PROFILE_REPOS_PATH}`)}
+    </nav>`;
+}
+
 export function profilePage(opts: {
   owner: string;
   profile: UserRow | null;
   repos: RepoSummary[];
+  readme: Readme | null;
+  hasProfileRepo: boolean;
+  isOwn: boolean;
   user: SessionUser | null;
 }): string {
-  const p = opts.profile;
-  const name = p ? displayName(p) : opts.owner;
-  const handle = p?.username && p.username !== p.slug ? p.username : null;
+  const name = ownerName(opts.owner, opts.profile);
+  const preview = opts.repos.slice(0, PROFILE_PREVIEW);
+  const more = opts.repos.length - preview.length;
+  const profileHref = `/${esc(opts.owner)}/${esc(PROFILE_REPO)}/`;
 
-  const known = p
-    ? `<p class="${c.repoDesc}">@${esc(p.slug)}${handle ? ` &middot; ${esc(handle)}` : ""} &middot; joined ${fmtDate(p.created_at).slice(0, 10)}</p>`
-    : `<p class="${c.repoDesc}">@${esc(opts.owner)} &middot; no account on this instance</p>`;
+  // The profile README is the page's headline when there is one. The three
+  // "no README" cases are only shown to the owner — a visitor has no use for
+  // them and they would read as an empty section — and they are kept distinct
+  // because the fix differs: create the repo, or push a README into it.
+  const readmeSection = opts.readme
+    ? `    <article class="${c.readme}">
+${renderMarkdown(opts.readme.text)}
+    </article>
+${opts.isOwn ? `    <p class="${c.repoDesc}"><a href="${profileHref}">${esc(PROFILE_REPO)}/${esc(opts.readme.path)}</a></p>` : ""}`
+    : !opts.isOwn
+      ? ""
+      : opts.hasProfileRepo
+        ? `    <p class="${c.cloneBox} ${c.repoDesc}">${icon("file")} <a href="${profileHref}">${esc(PROFILE_REPO)}</a> has no <code>README.md</code> yet. Push one and it shows up here.</p>`
+        : `    <form method="post" action="/new" class="${c.cloneBox} ${c.formRow}">
+      <input type="hidden" name="name" value="${esc(PROFILE_REPO)}">
+      <label class="${c.cloneLabel} ${c.withIcon}">${icon("file")}profile readme</label>
+      <span class="${c.repoDesc}">Create <code>${esc(PROFILE_REPO)}</code> and its README.md shows up here.</span>
+      <button type="submit">${icon("plus")}create</button>
+    </form>`;
 
-  const body = `    <section class="${c.profileHead}">
-      ${avatar(p ?? { name: opts.owner, username: null, picture: null }, "lg")}
-      <div>
-        <h1 class="${c.profileName}">${esc(name)}</h1>
-        ${known}
-      </div>
-    </section>
+  const moreLink =
+    more > 0
+      ? `    <p class="${c.repoDesc}"><a href="/${esc(opts.owner)}/${PROFILE_REPOS_PATH}">all ${opts.repos.length} repositories &rarr;</a></p>`
+      : "";
+
+  const body = `${ownerHead(opts.owner, opts.profile)}
+${ownerTabs(opts.owner, "profile")}
+${readmeSection}
     <h2 class="${c.sectionTitle}">repositories</h2>
-    ${repoTable(opts.repos, { showOwner: false, empty: "nothing here yet" })}`;
+    ${repoTable(preview, { showOwner: false, empty: "nothing here yet" })}
+${moreLink}`;
 
   return layout({
     title: name,
     user: opts.user,
     body,
-    description: `${name} (@${opts.owner}) on ${config.title}.`,
+    description: opts.readme
+      ? metaText(plainSummary(opts.readme.text))
+      : `${name} (@${opts.owner}) on ${config.title}.`,
     path: `/${opts.owner}`,
+    noindex: !opts.repos.some((r) => r.isPublic) && !opts.readme,
+  });
+}
+
+export function reposPage(opts: {
+  owner: string;
+  profile: UserRow | null;
+  repos: RepoSummary[];
+  user: SessionUser | null;
+}): string {
+  const name = ownerName(opts.owner, opts.profile);
+
+  const body = `${ownerHead(opts.owner, opts.profile)}
+${ownerTabs(opts.owner, "repos")}
+    <h2 class="${c.sectionTitle}">repositories</h2>
+    ${repoTable(opts.repos, { showOwner: false, empty: "nothing here yet" })}`;
+
+  return layout({
+    title: `${name} repositories`,
+    user: opts.user,
+    body,
+    description: `Repositories owned by ${name} (@${opts.owner}) on ${config.title}.`,
+    path: `/${opts.owner}/${PROFILE_REPOS_PATH}`,
     noindex: !opts.repos.some((r) => r.isPublic),
   });
 }

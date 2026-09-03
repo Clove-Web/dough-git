@@ -27,6 +27,11 @@ if (!hasColumn("tokens", "owner")) {
   db.exec("ALTER TABLE tokens ADD COLUMN owner TEXT");
 }
 
+// Every git request that carries credentials looks a token up by hash, so this
+// is the hottest read in the application and the one that must not become a
+// table scan as the token count grows.
+db.exec("CREATE INDEX IF NOT EXISTS tokens_hash ON tokens (hash)");
+
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }

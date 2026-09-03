@@ -3,7 +3,7 @@
 // HTTP entrypoint: wires the git smart-HTTP transport and the read-only viewer
 // onto one Hono app. Run with `npm start`.
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { serve } from "@hono/node-server";
 import { createReadStream, existsSync, statSync } from "node:fs";
@@ -54,6 +54,10 @@ import {
   dropMirrorStatusKind,
 } from "./mirror.ts";
 import {
+  PROFILE_REPO,
+  PROFILE_REPOS_PATH,
+  isProfileRepo,
+  headReadme,
   safeRef,
   refDir,
   refSlug,
@@ -65,6 +69,7 @@ import {
   restoreFromTrash,
   purgeFromTrash,
   purgeExpired,
+  purgeAllExpired,
   trashHasName,
   isRepoPublic,
   setRepoPublic,
@@ -82,6 +87,7 @@ import {
   setLinks,
   localMirrorRefs,
   type MirrorLink,
+  type Readme,
   type RepoRef,
   type RepoSummary,
   type RefList,
@@ -448,6 +454,17 @@ app.post("/new", async (c) => {
   return c.redirect(`/${result.ref.owner}/${result.ref.name}/`);
 });
 
+// Route params are typed as possibly-absent on a generic Context. These routes
+// always define them, but reading them through one helper keeps that assumption
+// in a single place instead of scattering casts, and gives a missing param the
+// same "no such repo" answer as an unsafe one.
+function refFromPath(c: Context<Env>, nameParam: "name" | "repo"): RepoRef | null {
+  const owner = c.req.param("owner");
+  const name = c.req.param(nameParam);
+  if (!owner || !name) return null;
+  return safeRef(owner, name);
+}
+
 const GIT_SERVICES: GitService[] = ["git-upload-pack", "git-receive-pack"];
 
 function authChallenge(message = "authentication required"): Response {
@@ -457,66 +474,82 @@ function authChallenge(message = "authentication required"): Response {
   });
 }
 
+// The outcome of the transport gate. It carries the actor as well as the
+// verdict because verifying a token is a hash lookup *and* a `last_used`
+// write: re-deriving the actor afterwards would bill every clone and push for
+// two of each, and leave two places that could disagree about who is pushing.
+interface GitGate {
+  response: Response | null;
+  actor: string | null;
+}
+
+const ALLOW = (actor: string | null): GitGate => ({ response: null, actor });
+const DENY = (response: Response): GitGate => ({ response, actor: null });
+
 async function gitGate(
   c: { req: { header: (n: string) => string | undefined } },
   ref: RepoRef,
   needPush: boolean,
-): Promise<Response | null> {
+): Promise<GitGate> {
   const auth = authenticateGit(c.req.header("authorization"));
   const actor = gitActor(auth);
   const exists = await repoExists(ref);
 
   if (auth.kind === "rejected") {
     console.warn(`[git] denied ${refSlug(ref)}: ${auth.message}`);
-    return new Response(`${auth.message}\n`, { status: 403 });
+    return DENY(new Response(`${auth.message}\n`, { status: 403 }));
   }
 
   if (needPush) {
-    if (!actor) return authChallenge();
+    if (!actor) return DENY(authChallenge());
 
     if (!exists) {
       if (actor !== ref.owner) {
         console.warn(`[git] denied create of ${refSlug(ref)} by ${actor}`);
-        return new Response(
-          `${actor} can only create repositories under ${actor}/\n`,
-          { status: 403 },
+        return DENY(
+          new Response(`${actor} can only create repositories under ${actor}/\n`, {
+            status: 403,
+          }),
         );
       }
       if (await trashHasName(ref.owner, ref.name)) {
         console.warn(`[git] refused auto-create of trashed ${refSlug(ref)}`);
-        return new Response(
-          `${refSlug(ref)} is in Recently Deleted. Restore it, or delete it ` +
-            `permanently, before pushing to that name again.\n`,
-          { status: 409 },
+        return DENY(
+          new Response(
+            `${refSlug(ref)} is in Recently Deleted. Restore it, or delete it ` +
+              `permanently, before pushing to that name again.\n`,
+            { status: 409 },
+          ),
         );
       }
       if (!config.autoCreate) {
-        return new Response("repository not found\n", { status: 404 });
+        return DENY(new Response("repository not found\n", { status: 404 }));
       }
       await initBareRepo(ref);
       clearRepoMetadata(ref);
       console.log(`[git] auto-created ${refSlug(ref)}.git on first push`);
       notifyRepoCreated(ref, actor, false);
-      return null;
+      return ALLOW(actor);
     }
 
     const isPublic = await isRepoPublic(ref);
     if (!canWrite({ ref, isPublic, viewer: actor })) {
       console.warn(`[git] denied push to ${refSlug(ref)} by ${actor}`);
-      return new Response(
-        `${actor} does not have write access to ${refSlug(ref)}\n`,
-        { status: 403 },
+      return DENY(
+        new Response(`${actor} does not have write access to ${refSlug(ref)}\n`, {
+          status: 403,
+        }),
       );
     }
-    return null;
+    return ALLOW(actor);
   }
 
   if (exists) {
     const isPublic = await isRepoPublic(ref);
-    if (canRead({ ref, isPublic, viewer: actor })) return null;
+    if (canRead({ ref, isPublic, viewer: actor })) return ALLOW(actor);
   }
-  if (auth.kind === "anonymous") return authChallenge();
-  return new Response("repository not found\n", { status: 404 });
+  if (auth.kind === "anonymous") return DENY(authChallenge());
+  return DENY(new Response("repository not found\n", { status: 404 }));
 }
 
 app.get("/:owner/:repo/info/refs", async (c) => {
@@ -526,19 +559,19 @@ app.get("/:owner/:repo/info/refs", async (c) => {
     return c.text("only smart HTTP is supported\n", 400);
   }
   const gate = await gitGate(c, ref, service === "git-receive-pack");
-  if (gate) return gate;
+  if (gate.response) return gate.response;
   return advertiseResponse(refDir(ref), service);
 });
 
-async function rpcHandler(c: any, service: GitService): Promise<Response> {
-  const ref = safeRef(c.req.param("owner"), c.req.param("repo"));
+async function rpcHandler(c: Context<Env>, service: GitService): Promise<Response> {
+  const ref = refFromPath(c, "repo");
   if (!ref) return c.text("bad repo\n", 400);
   const gate = await gitGate(c, ref, service === "git-receive-pack");
-  if (gate) return gate;
+  if (gate.response) return gate.response;
 
   const isPush = service === "git-receive-pack";
   const before = isPush ? await localMirrorRefs(ref) : new Map<string, string>();
-  const actor = gitActor(authenticateGit(c.req.header("authorization")));
+  const actor = gate.actor;
   const isPublic = isPush ? await isRepoPublic(ref) : false;
 
   return serviceRpc({
@@ -587,7 +620,7 @@ function readable(all: RepoSummary[], viewer: string | null): RepoSummary[] {
 app.get("/", async (c) => {
   const user = c.get("user");
   const viewer = viewerOf(c);
-  const all = await listRepos();
+  const all = (await listRepos()).filter((r) => !isProfileRepo(r.name));
   const shared = viewer ? new Set(sharedWith(viewer).map((r) => `${r.owner}/${r.name}`)) : null;
   return c.html(
     view.repoListPage(readable(all, viewer), user, {
@@ -596,7 +629,7 @@ app.get("/", async (c) => {
   );
 });
 
-function notFound(c: any) {
+function notFound(c: Context<Env>) {
   return c.html(
     view.messagePage({
       title: "not found",
@@ -615,8 +648,8 @@ interface ViewableRepo {
   rev: string;
 }
 
-async function viewable(c: any): Promise<ViewableRepo | null> {
-  const ref = safeRef(c.req.param("owner"), c.req.param("name"));
+async function viewable(c: Context<Env>): Promise<ViewableRepo | null> {
+  const ref = refFromPath(c, "name");
   if (!ref || !(await repoExists(ref))) return null;
 
   const isPublic = await isRepoPublic(ref);
@@ -646,7 +679,7 @@ app.get("/:owner/:name/log", async (c) => {
 app.get("/:owner/:name/tree", (c) => renderTree(c, ""));
 app.get("/:owner/:name/tree/:path{.*}", (c) => renderTree(c, c.req.param("path")));
 
-async function renderTree(c: any, path: string) {
+async function renderTree(c: Context<Env>, path: string) {
   const found = await viewable(c);
   if (!found) return notFound(c);
   const entries = await tree(found.ref, found.rev, path);
@@ -698,16 +731,16 @@ app.get("/:owner/:name/commit/:sha", async (c) => {
   );
 });
 
-async function ownedRef(c: any): Promise<RepoRef | null> {
+async function ownedRef(c: Context<Env>): Promise<RepoRef | null> {
   const user = c.get("user");
   if (!user) return null;
-  const ref = safeRef(c.req.param("owner"), c.req.param("name"));
+  const ref = refFromPath(c, "name");
   if (!ref || ref.owner !== view.ownerOf(user)) return null;
   return (await repoExists(ref)) ? ref : null;
 }
 
-async function writableRef(c: any): Promise<RepoRef | null> {
-  const ref = safeRef(c.req.param("owner"), c.req.param("name"));
+async function writableRef(c: Context<Env>): Promise<RepoRef | null> {
+  const ref = refFromPath(c, "name");
   if (!ref || !(await repoExists(ref))) return null;
   const isPublic = await isRepoPublic(ref);
   return canWrite({ ref, isPublic, viewer: viewerOf(c) }) ? ref : null;
@@ -804,6 +837,27 @@ app.post("/:owner/:name/collaborators/remove", async (c) => {
   return c.redirect(`/${ref.owner}/${ref.name}/`);
 });
 
+// The profile README, read through exactly the same access rules as any other
+// repository. A private +dough stays invisible to everyone it was not shared
+// with, so a profile page can never show content the viewer could not clone.
+async function profileReadme(
+  owner: string,
+  viewer: string | null,
+): Promise<Readme | null> {
+  const ref = safeRef(owner, PROFILE_REPO);
+  if (!ref || !(await repoExists(ref))) return null;
+  const isPublic = await isRepoPublic(ref);
+  if (!canRead({ ref, isPublic, viewer })) return null;
+  return headReadme(ref);
+}
+
+// The owner's repositories, minus the profile repo. +dough is machinery for
+// the page the visitor is already looking at, so listing it is noise; it keeps
+// its own repo page at /<owner>/+dough and is reachable from the profile.
+function ownedRepos(all: RepoSummary[], owner: string): RepoSummary[] {
+  return all.filter((r) => r.owner === owner && !isProfileRepo(r.name));
+}
+
 app.get("/:owner", async (c) => {
   const owner = c.req.param("owner");
   if (!safeRef(owner, "x")) return notFound(c);
@@ -812,11 +866,43 @@ app.get("/:owner", async (c) => {
   const viewer = viewerOf(c);
   const all = await listRepos();
   const owned = all.filter((r) => r.owner === owner);
-  const repos = readable(owned, viewer);
+  const repos = readable(ownedRepos(all, owner), viewer);
   const profile = findUserBySlug(owner);
 
   if (!profile && owned.length === 0) return notFound(c);
-  return c.html(view.profilePage({ owner, profile, repos, user }));
+
+  return c.html(
+    view.profilePage({
+      owner,
+      profile,
+      repos,
+      readme: await profileReadme(owner, viewer),
+      hasProfileRepo: owned.some((r) => isProfileRepo(r.name)),
+      isOwn: viewer === owner,
+      user,
+    }),
+  );
+});
+
+// Registered ahead of /:owner/:name. safeName() refuses "+repos" as a
+// repository name, so this route and a repo page can never contend.
+app.get(`/:owner/${PROFILE_REPOS_PATH}`, async (c) => {
+  const owner = c.req.param("owner");
+  if (!safeRef(owner, "x")) return notFound(c);
+
+  const viewer = viewerOf(c);
+  const all = await listRepos();
+  const profile = findUserBySlug(owner);
+  if (!profile && !all.some((r) => r.owner === owner)) return notFound(c);
+
+  return c.html(
+    view.reposPage({
+      owner,
+      profile,
+      repos: readable(ownedRepos(all, owner), viewer),
+      user: c.get("user"),
+    }),
+  );
 });
 
 app.get("/:owner/:name", async (c) => {
@@ -928,6 +1014,23 @@ app.post("/:owner/:name/mirrors/check", async (c) => {
   return c.redirect(`/${ref.owner}/${ref.name}/`);
 });
 
+// Recently Deleted is swept on a timer rather than only when somebody opens
+// the page, so MINIGIT_TRASH_DAYS is a retention window rather than a hint. The
+// interval is unref'd: it must never be the reason the process stays alive.
+const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+async function sweepTrash(): Promise<void> {
+  try {
+    const purged = await purgeAllExpired();
+    for (const gone of purged) {
+      clearRepoMetadata({ owner: gone.owner, name: gone.name });
+      console.log(`[trash] expired ${gone.owner}/${gone.name}`);
+    }
+  } catch (err) {
+    console.warn("[trash] scheduled sweep failed:", err);
+  }
+}
+
 serve(
   {
     fetch: app.fetch,
@@ -940,6 +1043,9 @@ serve(
     console.log(`  static dir: ${config.staticDir}`);
     console.log(`  base url:   ${config.baseUrl}`);
     console.log(`  oidc:       ${oidcEnabled ? "enabled" : "disabled"}`);
+    console.log(
+      `  trash:      ${config.trashDays > 0 ? `${config.trashDays}d, swept every 6h` : "kept forever"}`,
+    );
     console.log(`  logins:     any PocketID account`);
     if (oidcEnabled) {
       try {
@@ -953,5 +1059,8 @@ serve(
         );
       }
     }
+
+    void sweepTrash();
+    setInterval(() => void sweepTrash(), SWEEP_INTERVAL_MS).unref();
   },
 );
