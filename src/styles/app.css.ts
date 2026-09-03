@@ -19,6 +19,14 @@ const readme = style({
 export const classes = {
   readme,
 
+  // Icon-then-label. Used anywhere an icon() sits next to text and needs to
+  // ride the text baseline with consistent spacing rather than a literal space.
+  withIcon: style({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.4rem",
+  }),
+
   siteHeader: style({
     display: "grid",
     gridTemplateColumns: "1fr auto 1fr",
@@ -58,7 +66,12 @@ export const classes = {
     gap: "0.75rem",
   }),
 
-  navLink: style({ color: vars.accent }),
+  navLink: style({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.35rem",
+    color: vars.accent,
+  }),
 
   user: style({
     display: "flex",
@@ -173,6 +186,9 @@ export const classes = {
   }),
 
   tab: style({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.4rem",
     padding: "0.2rem 0.7rem",
     border: `1px solid ${vars.border}`,
     borderRadius: vars.radius,
@@ -256,7 +272,9 @@ export const classes = {
   message: style({ color: vars.textMuted }),
 
   badge: style({
-    display: "inline-block",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.25rem",
     padding: "0.05rem 0.4rem",
     marginLeft: "0.4rem",
     borderRadius: 0,

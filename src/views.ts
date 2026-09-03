@@ -5,6 +5,7 @@
 
 import { config } from "./config.ts";
 import { classes as c } from "./styles/index.ts";
+import { icon } from "./icons.ts";
 import { escapeHtml, renderMarkdown, plainSummary } from "./markdown.ts";
 import { sessionSlug } from "./auth.ts";
 import { maskWebhook, mirrorHost, MIRROR_KINDS, type MirrorKind } from "./urls.ts";
@@ -65,11 +66,11 @@ function revPicker(refs: RefList, rev: string): string {
     : `<option value="${esc(rev)}" selected>${esc(rev.slice(0, 10))}</option>`;
 
   return `<form method="get" class="${c.revPicker}">
-      <label class="${c.cloneLabel}" for="rev-picker">revision</label>
+      <label class="${c.cloneLabel} ${c.withIcon}" for="rev-picker">${icon("git-branch")}revision</label>
       <select id="rev-picker" name="h" data-autosubmit>
         ${detached}${options(refs.branches, "branches")}${options(refs.tags, "tags")}
       </select>
-      <button type="submit">go</button>
+      <button type="submit">${icon("arrow-right")}go</button>
     </form>`;
 }
 
@@ -111,16 +112,16 @@ function layout(opts: {
     ? `<a class="${c.user}" href="/${esc(ownerOf(opts.user))}">${avatar(opts.user, "sm")}${esc(displayName(opts.user))}</a>`
     : "";
   const settings = opts.user
-    ? `<a class="${c.navLink}" href="/settings">settings</a>
-       <a class="${c.navLink}" href="/auth/logout">logout</a>`
-    : `<a class="${c.navLink}" href="/auth/login">login</a>`;
+    ? `<a class="${c.navLink}" href="/settings">${icon("gear")}settings</a>
+       <a class="${c.navLink}" href="/auth/logout">${icon("logout")}logout</a>`
+    : `<a class="${c.navLink}" href="/auth/login">${icon("login")}login</a>`;
 
   const description = metaText(opts.description || config.description);
   const url = opts.path ? esc(config.baseUrl + opts.path) : esc(config.baseUrl);
-  const icon = esc(config.favicon);
+  const faviconUrl = esc(config.favicon);
   const logo = config.favicon
-    ? `<img class="${c.siteLogo}" src="${icon}" alt="" width="24" height="24">`
-    : "";
+    ? `<img class="${c.siteLogo}" src="${faviconUrl}" alt="" width="24" height="24">`
+    : icon("git-branch", 20);
 
   return `<!doctype html>
 <html lang="en">
@@ -137,13 +138,13 @@ function layout(opts: {
   <meta property="og:title" content="${esc(opts.title)}">
   <meta property="og:description" content="${description}">
   <meta property="og:url" content="${url}">
-  <meta property="og:image" content="${icon}">
+  <meta property="og:image" content="${faviconUrl}">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="${esc(opts.title)}">
   <meta name="twitter:description" content="${description}">
-  <meta name="twitter:image" content="${icon}">
-  <link rel="icon" href="${icon}">
-  <link rel="apple-touch-icon" href="${icon}">
+  <meta name="twitter:image" content="${faviconUrl}">
+  <link rel="icon" href="${faviconUrl}">
+  <link rel="apple-touch-icon" href="${faviconUrl}">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/app.js" defer></script>
 </head>
@@ -157,7 +158,7 @@ function layout(opts: {
 ${opts.body}
   </main>
   <footer class="${c.siteFooter}">
-    <span>dough-git &middot; a minimal git mirror</span>
+    <span class="${c.withIcon}">${icon("git-merge")}dough-git &middot; a minimal git mirror</span>
   </footer>
 </body>
 </html>`;
@@ -177,12 +178,12 @@ function repoTable(
         ? `<a class="${c.ownerLink}" href="/${esc(r.owner)}">${esc(r.owner)}</a>/`
         : "";
       const shared = opts.sharedSlugs?.has(`${r.owner}/${r.name}`)
-        ? `<span class="${c.badge}">shared</span>`
+        ? `<span class="${c.badge}">${icon("users", 11)}shared</span>`
         : "";
       return `      <tr class="${c.repoRow}">
-        <td class="${c.repoName}">${owner}<a href="${base(r.owner, r.name)}/">${esc(r.name)}</a>${shared}</td>
+        <td class="${c.repoName}">${icon("git-branch")} ${owner}<a href="${base(r.owner, r.name)}/">${esc(r.name)}</a>${shared}</td>
         <td class="${c.repoDesc}">${esc(r.description)}</td>
-        <td class="${c.repoVis}">${r.isPublic ? "public" : "private"}</td>
+        <td class="${c.repoVis}"><span class="${c.withIcon}">${icon(r.isPublic ? "unlock" : "lock", 13)}${r.isPublic ? "public" : "private"}</span></td>
         <td class="${c.repoIdle}">${fmtDate(r.lastCommit)}</td>
       </tr>`;
     })
@@ -205,10 +206,10 @@ export function repoListPage(
 ): string {
   const createForm = user
     ? `    <form method="post" action="/new" class="${c.cloneBox} ${c.formRow}">
-      <label class="${c.cloneLabel}">new repo</label>
+      <label class="${c.cloneLabel} ${c.withIcon}">${icon("folder-plus")}new repo</label>
       <span class="${c.repoVis}">${esc(ownerOf(user))}/</span>
       <input type="text" name="name" placeholder="my-project" pattern="[A-Za-z0-9._-]+" required>
-      <button type="submit">create</button>
+      <button type="submit">${icon("plus")}create</button>
     </form>`
     : "";
 
@@ -267,12 +268,12 @@ function repoNav(
   q: string,
 ): string {
   const b = base(owner, name);
-  const tab = (id: string, label: string, href: string) =>
-    `<a class="${c.tab}${id === active ? " " + c.tabActive : ""}" href="${href}">${label}</a>`;
+  const tab = (id: string, label: string, glyph: string, href: string) =>
+    `<a class="${c.tab}${id === active ? " " + c.tabActive : ""}" href="${href}">${icon(glyph)}${label}</a>`;
   return `    <nav class="${c.repoTabs}">
-      ${tab("summary", "summary", `${b}/${q}`)}
-      ${tab("log", "log", `${b}/log${q}`)}
-      ${tab("tree", "tree", `${b}/tree${q}`)}
+      ${tab("summary", "summary", "article", `${b}/${q}`)}
+      ${tab("log", "log", "git-commit", `${b}/log${q}`)}
+      ${tab("tree", "tree", "folder", `${b}/tree${q}`)}
     </nav>`;
 }
 
@@ -287,7 +288,7 @@ function commitTable(
     .map(
       (cm) => `      <tr>
         <td class="${c.commitDate}">${fmtDate(cm.time)}</td>
-        <td class="${c.commitSubject}"><a href="${b}/commit/${esc(cm.hash)}${q}">${esc(cm.subject)}</a></td>
+        <td class="${c.commitSubject}">${icon("git-commit", 13)} <a href="${b}/commit/${esc(cm.hash)}${q}">${esc(cm.subject)}</a></td>
         <td class="${c.commitAuthor}">${esc(cm.author)}</td>
         <td class="${c.commitHash}">${esc(cm.hash.slice(0, 10))}</td>
       </tr>`,
@@ -337,23 +338,23 @@ export function summaryPage(opts: {
   const readmeSection = empty
     ? ""
     : opts.readme
-      ? `    <h2 class="${c.sectionTitle}">${esc(opts.readme.path)}</h2>
+      ? `    <h2 class="${c.sectionTitle}">${icon("file-text")}${esc(opts.readme.path)}</h2>
     <article class="${c.readme}">
 ${renderMarkdown(opts.readme.text)}
     </article>`
-      : `    <h2 class="${c.sectionTitle}">readme</h2>
+      : `    <h2 class="${c.sectionTitle}">${icon("file-text")}readme</h2>
     <p class="${c.empty}">No ReadMe was found, commit one to add a summary</p>`;
 
   const isOwner = opts.collaborators !== null;
   const manage = isOwner
-    ? `    <h2 class="${c.sectionTitle}">manage</h2>
+    ? `    <h2 class="${c.sectionTitle}">${icon("gear")}manage</h2>
     <div class="${c.repoTabs}">
       <form method="post" action="${base(opts.owner, opts.name)}/visibility">
         <input type="hidden" name="public" value="${opts.isPublic ? "" : "on"}">
-        <button type="submit">make ${opts.isPublic ? "private" : "public"}</button>
+        <button type="submit">${icon(opts.isPublic ? "lock" : "unlock")}make ${opts.isPublic ? "private" : "public"}</button>
       </form>
       <form method="post" action="${base(opts.owner, opts.name)}/delete" data-confirm="Delete ${esc(title)} permanently? This cannot be undone.">
-        <button type="submit">delete repository</button>
+        <button type="submit">${icon("trash")}delete repository</button>
       </form>
     </div>
 ${collaboratorSection(opts.owner, opts.name, opts.collaborators ?? [])}`
@@ -361,22 +362,22 @@ ${collaboratorSection(opts.owner, opts.name, opts.collaborators ?? [])}`
 
   const descriptionForm = opts.canPush
     ? `    <form method="post" action="${base(opts.owner, opts.name)}/description" class="${c.cloneBox} ${c.formRow}">
-      <label class="${c.cloneLabel}" for="repo-description">description</label>
+      <label class="${c.cloneLabel} ${c.withIcon}" for="repo-description">${icon("note")}description</label>
       <input id="repo-description" class="${c.grow}" type="text" name="description" maxlength="300"
         value="${esc(opts.rawDescription)}" placeholder="what this repository is for">
-      <button type="submit">save</button>
+      <button type="submit">${icon("save")}save</button>
     </form>`
     : opts.rawDescription
       ? `    <p class="${c.repoDesc}">${esc(opts.rawDescription)}</p>`
       : "";
 
   const body = `    <h1 class="${c.pageTitle}"><a class="${c.ownerLink}" href="/${esc(opts.owner)}">${esc(opts.owner)}</a>/${esc(opts.name)}</h1>
-    <p class="${c.repoDesc}">${opts.isPublic ? "public" : "private"}${opts.canPush && !isOwner ? `<span class="${c.badge}">you can push</span>` : ""}</p>
+    <p class="${c.repoDesc}"><span class="${c.withIcon}">${icon(opts.isPublic ? "unlock" : "lock", 13)}${opts.isPublic ? "public" : "private"}</span>${opts.canPush && !isOwner ? `<span class="${c.badge}">${icon("upload", 11)}you can push</span>` : ""}</p>
 ${repoNav(opts.owner, opts.name, "summary", q)}
 ${descriptionForm}
     ${revPicker(opts.refs, opts.rev)}
     <section class="${c.cloneBox}">
-      <span class="${c.cloneLabel}">clone</span>
+      <span class="${c.cloneLabel} ${c.withIcon}">${icon("download")}clone</span>
       <code>git clone ${esc(cloneUrl(opts.owner, opts.name))}</code>
     </section>
 ${pushHint}
@@ -419,8 +420,8 @@ function mirrorSection(
       const status = statuses.get(link.kind) ?? null;
       const view = describeMirror(link, status, nowSec);
       return `      <div class="${c.mirrorRow}">
-        <span class="${c.mirrorKind}"><a href="${esc(link.url)}" rel="nofollow noopener noreferrer">${esc(link.kind)}</a></span>
-        <span class="${view.cls}">${esc(view.label)}</span>
+        <span class="${c.mirrorKind}"><a class="${c.withIcon}" href="${esc(link.url)}" rel="nofollow noopener noreferrer">${icon(link.kind === "github" ? "github" : "git-branch")}${esc(link.kind)}</a></span>
+        <span class="${view.cls} ${c.withIcon}">${icon(view.glyph)}${esc(view.label)}</span>
         <span class="${c.commitHash}">${esc(view.sha)}</span>
         <span class="${c.repoDesc}">${esc(view.detail)}</span>
       </div>${view.note ? `\n      <p class="${view.noteCls}">${esc(view.note)}</p>` : ""}`;
@@ -429,7 +430,7 @@ function mirrorSection(
 
   const local = localSha
     ? `      <div class="${c.mirrorRow}">
-        <span class="${c.mirrorKind}">local</span>
+        <span class="${c.mirrorKind} ${c.withIcon}">${icon("home")}local</span>
         <span class="${c.statusMuted}">this repository</span>
         <span class="${c.commitHash}">${esc(localSha.slice(0, 7))}</span>
         <span></span>
@@ -439,7 +440,7 @@ function mirrorSection(
   const checkButton =
     canCheck && links.some((l) => !l.isPrivate)
       ? `      <form method="post" action="${base(owner, name)}/mirrors/check">
-        <button type="submit">check now</button>
+        <button type="submit">${icon("reload")}check now</button>
       </form>`
       : "";
 
@@ -455,7 +456,7 @@ ${checkButton}
   const field = (kind: MirrorKind) => {
     const existing = links.find((l) => l.kind === kind);
     return `      <div class="${c.formRow}">
-        <label class="${c.cloneLabel}" for="mirror-${kind}">${kind}</label>
+        <label class="${c.cloneLabel} ${c.withIcon}" for="mirror-${kind}">${icon(kind === "github" ? "github" : "git-branch")}${kind}</label>
         <input id="mirror-${kind}" class="${c.grow}" type="url" name="${kind}"
           value="${esc(existing?.url ?? "")}" placeholder="https://${esc(mirrorHost(kind))}/user/repo">
         <label><input type="checkbox" name="${kind}_private"${existing?.isPrivate ? " checked" : ""}> private</label>
@@ -468,11 +469,11 @@ ${MIRROR_KINDS.map(field).join("\n")}
       <p class="${c.repoDesc}">Only ${esc(MIRROR_KINDS.map(mirrorHost).join(" and "))} are accepted.
       Mark a mirror <em>private</em> to skip status checks — they are anonymous, so a private
       mirror would otherwise always look unreachable. Clear a field to remove it.</p>
-      <button type="submit">save mirrors</button>
+      <button type="submit">${icon("save")}save mirrors</button>
     </form>`
     : "";
 
-  return `    <h2 class="${c.sectionTitle}">external mirrors</h2>
+  return `    <h2 class="${c.sectionTitle}">${icon("cloud-server")}external mirrors</h2>
 ${body}
 ${form}`;
 }
@@ -483,6 +484,7 @@ function describeMirror(
   nowSec: number,
 ): {
   label: string;
+  glyph: string;
   cls: string;
   sha: string;
   detail: string;
@@ -494,31 +496,40 @@ function describeMirror(
   if (link.isPrivate) {
     return {
       ...blank,
-      label: "🔒 Not checked (private)",
+      label: "Not checked (private)",
+      glyph: "lock",
       cls: c.statusMuted,
       sha: "",
       detail: "status checks are anonymous",
     };
   }
   if (!status || (!status.state && !status.error)) {
-    return { ...blank, label: "— not checked yet", cls: c.statusMuted, sha: "", detail: "" };
+    return {
+      ...blank,
+      label: "not checked yet",
+      glyph: "hourglass",
+      cls: c.statusMuted,
+      sha: "",
+      detail: "",
+    };
   }
 
-  const LABELS: Record<string, { label: string; cls: string }> = {
-    synced: { label: "✓ Up to date", cls: c.statusGood },
-    ahead: { label: "↑ Mirror behind", cls: c.statusWarn },
-    behind: { label: "↓ Local behind", cls: c.statusWarn },
-    diverged: { label: "⚠ Diverged", cls: c.statusBad },
-    out_of_sync: { label: "⚠ Out of sync", cls: c.statusBad },
-    denied: { label: "🔒 Private or missing", cls: c.statusWarn },
-    missing: { label: "✗ Repository missing", cls: c.statusBad },
+  const LABELS: Record<string, { label: string; glyph: string; cls: string }> = {
+    synced: { label: "Up to date", glyph: "check", cls: c.statusGood },
+    ahead: { label: "Mirror behind", glyph: "arrow-up", cls: c.statusWarn },
+    behind: { label: "Local behind", glyph: "arrow-down", cls: c.statusWarn },
+    diverged: { label: "Diverged", glyph: "warning-diamond", cls: c.statusBad },
+    out_of_sync: { label: "Out of sync", glyph: "warning-diamond", cls: c.statusBad },
+    denied: { label: "Private or missing", glyph: "lock", cls: c.statusWarn },
+    missing: { label: "Repository missing", glyph: "close", cls: c.statusBad },
   };
 
   if (status.error) {
     const known = status.state ? LABELS[status.state] : undefined;
     const stale = status.okAt !== null && nowSec - status.okAt > 24 * 3600;
     return {
-      label: known ? known.label : "? Unavailable",
+      label: known ? known.label : "Unavailable",
+      glyph: known ? known.glyph : "circle-question",
       cls: known ? c.statusMuted : c.statusBad,
       sha: status.remoteSha ? status.remoteSha.slice(0, 7) : "",
       detail: status.okAt ? `last verified ${ago(nowSec - status.okAt)} ago` : "never verified",
@@ -536,7 +547,8 @@ function describeMirror(
   const known = status.state ? LABELS[status.state] : undefined;
   const stale = status.okAt !== null && nowSec - status.okAt > 24 * 3600;
   return {
-    label: known?.label ?? "? Unavailable",
+    label: known?.label ?? "Unavailable",
+    glyph: known?.glyph ?? "circle-question",
     cls: known?.cls ?? c.statusBad,
     sha: status.remoteSha ? status.remoteSha.slice(0, 7) : "",
     detail: [status.detail, status.okAt ? `checked ${ago(nowSec - status.okAt)} ago` : ""]
@@ -566,30 +578,30 @@ function collaboratorSection(
   const rows = collaborators
     .map(
       (person) => `      <tr>
-        <td><a href="/${esc(person.slug)}">${esc(person.slug)}</a></td>
+        <td>${icon("user", 13)} <a href="/${esc(person.slug)}">${esc(person.slug)}</a></td>
         <td class="${c.repoVis}">${esc(person.level)}</td>
         <td class="${c.commitDate}">${fmtDate(person.added_at)}</td>
         <td>
           <form method="post" action="${action}/remove">
             <input type="hidden" name="slug" value="${esc(person.slug)}">
-            <button type="submit">remove</button>
+            <button type="submit">${icon("user-x")}remove</button>
           </form>
         </td>
       </tr>`,
     )
     .join("\n");
 
-  return `    <h2 class="${c.sectionTitle}">collaborators</h2>
+  return `    <h2 class="${c.sectionTitle}">${icon("users")}collaborators</h2>
     <p class="${c.repoDesc}">People here can see this repository even while it is
     private. <code>write</code> also lets them push to it.</p>
     <form method="post" action="${action}" class="${c.cloneBox} ${c.formRow}">
-      <label class="${c.cloneLabel}" for="collab-slug">username</label>
+      <label class="${c.cloneLabel} ${c.withIcon}" for="collab-slug">${icon("user")}username</label>
       <input id="collab-slug" type="text" name="slug" placeholder="their handle" pattern="[A-Za-z0-9._-]+" required>
       <select name="level" aria-label="access level">
         <option value="read">read</option>
         <option value="write">write</option>
       </select>
-      <button type="submit">add</button>
+      <button type="submit">${icon("user-plus")}add</button>
     </form>
     <table>
       <thead>
@@ -652,7 +664,7 @@ export function treePage(opts: {
   const parent = opts.path
     ? `      <tr class="${c.repoRow}">
         <td class="${c.treeMode}"></td>
-        <td class="${c.treeName}"><a href="${b}/tree/${esc(opts.path.split("/").slice(0, -1).join("/"))}${q}">../</a></td>
+        <td class="${c.treeName}">${icon("arrow-up", 13)} <a href="${b}/tree/${esc(opts.path.split("/").slice(0, -1).join("/"))}${q}">../</a></td>
         <td class="${c.treeSize}"></td>
       </tr>`
     : "";
@@ -666,7 +678,7 @@ export function treePage(opts: {
           : `${b}/blob/${esc(childPath)}${q}`;
       return `      <tr class="${c.repoRow}">
         <td class="${c.treeMode}">${esc(e.mode)}</td>
-        <td class="${c.treeName}"><a href="${href}">${esc(e.name)}${e.type === "tree" ? "/" : ""}</a></td>
+        <td class="${c.treeName}">${icon(e.type === "tree" ? "folder" : "file-text", 13)} <a href="${href}">${esc(e.name)}${e.type === "tree" ? "/" : ""}</a></td>
         <td class="${c.treeSize}">${esc(e.size)}</td>
       </tr>`;
     })
@@ -717,7 +729,7 @@ export function blobPage(opts: {
   const upPath = opts.path.split("/").slice(0, -1).join("/");
   const body = `    <h1 class="${c.pageTitle}">${esc(opts.owner)}/${esc(opts.name)} &middot; ${esc(opts.path)}</h1>
 ${repoNav(opts.owner, opts.name, "tree", q)}
-    <p class="${c.repoDesc}"><a href="${base(opts.owner, opts.name)}/tree/${esc(upPath)}${q}">&larr; back to ${esc(upPath || "tree")}</a></p>
+    <p class="${c.repoDesc}"><a class="${c.withIcon}" href="${base(opts.owner, opts.name)}/tree/${esc(upPath)}${q}">${icon("arrow-left")}back to ${esc(upPath || "tree")}</a></p>
     ${content}`;
   return layout({
     title: opts.path,
@@ -740,9 +752,9 @@ export function commitPage(opts: {
   const body = `    <h1 class="${c.pageTitle}">${esc(cm.subject)}</h1>
 ${repoNav(opts.owner, opts.name, "log", q)}
     <dl class="${c.commitMeta}">
-      <dt>commit</dt><dd class="${c.commitHash}">${esc(cm.hash)}</dd>
-      <dt>author</dt><dd>${esc(cm.author)} &lt;${esc(cm.email)}&gt;</dd>
-      <dt>date</dt><dd>${fmtDate(cm.time)}</dd>
+      <dt class="${c.withIcon}">${icon("git-commit", 13)}commit</dt><dd class="${c.commitHash}">${esc(cm.hash)}</dd>
+      <dt class="${c.withIcon}">${icon("user", 13)}author</dt><dd>${esc(cm.author)} &lt;${esc(cm.email)}&gt;</dd>
+      <dt class="${c.withIcon}">${icon("clock", 13)}date</dt><dd>${fmtDate(cm.time)}</dd>
     </dl>
     ${cm.body ? `<pre class="${c.code}">${esc(cm.body)}</pre>` : ""}
     ${cm.diffTruncated ? `<p class="${c.binaryNotice}">This diff is too large to show in full. Clone the repository to read all of it.</p>` : ""}
@@ -757,12 +769,12 @@ ${repoNav(opts.owner, opts.name, "log", q)}
 }
 
 function settingsNav(active: string): string {
-  const tab = (id: string, label: string, href: string) =>
-    `<a class="${c.tab}${id === active ? " " + c.tabActive : ""}" href="${href}">${label}</a>`;
+  const tab = (id: string, label: string, glyph: string, href: string) =>
+    `<a class="${c.tab}${id === active ? " " + c.tabActive : ""}" href="${href}">${icon(glyph)}${label}</a>`;
   return `    <nav class="${c.repoTabs}">
-      ${tab("account", "account", "/settings")}
-      ${tab("tokens", "tokens", "/settings/tokens")}
-      ${tab("deleted", "recently deleted", "/settings/deleted")}
+      ${tab("account", "account", "user", "/settings")}
+      ${tab("tokens", "tokens", "key", "/settings/tokens")}
+      ${tab("deleted", "recently deleted", "trash", "/settings/deleted")}
     </nav>`;
 }
 
@@ -780,7 +792,7 @@ export function tokensPage(opts: {
         <td class="${c.commitDate}">${t.last_used ? fmtDate(t.last_used) : "never"}</td>
         <td>
           <form method="post" action="/settings/tokens/${esc(t.id)}/revoke">
-            <button type="submit">revoke</button>
+            <button type="submit">${icon("close")}revoke</button>
           </form>
         </td>
       </tr>`,
@@ -799,15 +811,15 @@ export function tokensPage(opts: {
 
   const body = `    <h1 class="${c.pageTitle}">settings</h1>
 ${settingsNav("tokens")}
-    <h2 class="${c.sectionTitle}">access tokens</h2>
+    <h2 class="${c.sectionTitle}">${icon("key")}access tokens</h2>
     <p class="${c.repoDesc}">These tokens act as <code>${esc(authUser)}</code>: use that as the git
     <strong>username</strong> and the token as the <strong>password</strong>. They can only push to
     repositories under <code>${esc(authUser)}/</code>.</p>
 ${created}
     <form method="post" action="/settings/tokens" class="${c.cloneBox}">
-      <label class="${c.cloneLabel}">label</label>
+      <label class="${c.cloneLabel} ${c.withIcon}">${icon("label")}label</label>
       <input type="text" name="label" placeholder="laptop, backup cron, ...">
-      <button type="submit">create token</button>
+      <button type="submit">${icon("plus")}create token</button>
     </form>
     <table>
       <thead>
@@ -848,7 +860,7 @@ export function settingsPage(opts: {
   const clear = s.discordWebhook
     ? `      <form method="post" action="/settings/discord" data-confirm="Remove the Discord webhook? Events will stop being announced.">
         <input type="hidden" name="url" value="">
-        <button type="submit">remove webhook</button>
+        <button type="submit">${icon("trash")}remove webhook</button>
       </form>`
     : "";
 
@@ -856,22 +868,22 @@ export function settingsPage(opts: {
 ${settingsNav("account")}
 ${opts.saved ? `    <p class="${c.statusGood}">${esc(opts.saved)}</p>` : ""}
 
-    <h2 class="${c.sectionTitle}">discord notifications</h2>
+    <h2 class="${c.sectionTitle}">${icon("discord")}discord notifications</h2>
     <p class="${c.repoDesc}">Announces repositories being created and deleted, and commits being
     pushed. Only repositories you own are announced, and only to this webhook.</p>
     <section class="${c.cloneBox}">
 ${webhookState}
 ${webhookError}
       <form method="post" action="/settings/discord" class="${c.formRow}">
-        <label class="${c.cloneLabel}" for="discord-url">webhook</label>
+        <label class="${c.cloneLabel} ${c.withIcon}" for="discord-url">${icon("link")}webhook</label>
         <input id="discord-url" class="${c.grow}" type="url" name="url" autocomplete="off"
           placeholder="https://discord.com/api/webhooks/…">
-        <button type="submit">save</button>
+        <button type="submit">${icon("save")}save</button>
       </form>
 ${clear}
     </section>
 
-    <h2 class="${c.sectionTitle}">preferences</h2>
+    <h2 class="${c.sectionTitle}">${icon("sliders")}preferences</h2>
     <form method="post" action="/settings/prefs" class="${c.cloneBox}">
       <p><label><input type="checkbox" name="default_private"${on(s.defaultPrivate)}>
         New repositories start private</label></p>
@@ -883,10 +895,10 @@ ${clear}
         Check mirror status automatically when viewing a repository</label>
         <br><span class="${c.repoDesc}">Off means mirrors are only checked when you press
         <em>check now</em>.</span></p>
-      <button type="submit">save preferences</button>
+      <button type="submit">${icon("save")}save preferences</button>
     </form>
 
-    <h2 class="${c.sectionTitle}">account</h2>
+    <h2 class="${c.sectionTitle}">${icon("user")}account</h2>
     <p class="${c.repoDesc}">Your name and avatar come from PocketID and refresh on each sign-in,
     so there is nothing to edit here. Your owner namespace is
     <code>${esc(opts.user ? ownerOf(opts.user) : "")}</code> and never changes.</p>`;
@@ -931,20 +943,20 @@ export function deletedPage(opts: {
           : "";
 
       return `      <tr>
-        <td class="${c.repoName}">${esc(e.name)}${note}</td>
+        <td class="${c.repoName}">${icon("git-branch", 13)} ${esc(e.name)}${note}</td>
         <td class="${c.commitDate}">${fmtDate(e.deletedAt)}</td>
         <td class="${c.repoDesc}">${esc(e.deletedBy)}</td>
         <td>${life}</td>
         <td>
           <form method="post" action="/settings/deleted/restore">
             <input type="hidden" name="entry" value="${esc(e.entry)}">
-            <button type="submit">restore</button>
+            <button type="submit">${icon("undo")}restore</button>
           </form>
         </td>
         <td>
           <form method="post" action="/settings/deleted/purge" data-confirm="Permanently delete ${esc(e.name)}? This destroys the git data and cannot be undone.">
             <input type="hidden" name="entry" value="${esc(e.entry)}">
-            <button type="submit">delete permanently</button>
+            <button type="submit">${icon("trash")}delete permanently</button>
           </form>
         </td>
       </tr>`;
@@ -958,7 +970,7 @@ export function deletedPage(opts: {
 
   const body = `    <h1 class="${c.pageTitle}">settings</h1>
 ${settingsNav("deleted")}
-    <h2 class="${c.sectionTitle}">recently deleted</h2>
+    <h2 class="${c.sectionTitle}">${icon("trash")}recently deleted</h2>
     <p class="${c.repoDesc}">${esc(retention)} A deleted repository keeps its name reserved, so
     nothing new can take it until it is restored or purged.</p>
     <table>
