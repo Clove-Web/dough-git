@@ -30,7 +30,11 @@ globalStyle("a", {
 
 globalStyle("a:hover", { textDecoration: "underline" });
 
-// Self-hosted pixel cursor (dark art, since dough-git is always dark).
+// Self-hosted pixel cursor (dark art only, since dough-git is always dark).
+// The PNGs are pixelarticons' free cursors, downloaded from
+// https://pixelarticons.com/free/cursors/ and committed to public/cursors/ —
+// they are NOT part of the pixelarticons npm package that src/icons.ts reads,
+// so they have to travel with the repo. The trailing numbers are the hotspot.
 globalStyle("a, button", {
   cursor: "url('/static/cursors/pointer-dark.png') 12 1, pointer",
 });

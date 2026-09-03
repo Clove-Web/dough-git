@@ -7,7 +7,11 @@
 
 import { globalFontFace } from "@vanilla-extract/css";
 
-const CDN = "https://m.doughmination.gay/f";
+// Exported so the server can name this origin in font-src. A CSP of 'self'
+// alone blocks every face below, and the page silently falls back to system-ui.
+export const FONT_ORIGIN = "https://m.doughmination.gay";
+
+const CDN = `${FONT_ORIGIN}/f`;
 
 const COMIC_CODE = [
   { file: "ComicCode-Regular", weight: 400, style: "normal" },
