@@ -1,17 +1,6 @@
-/* src/smart-http.ts */
-//
-// Git "smart HTTP" transport.
-//
-// This implements the two request shapes a git client makes when cloning,
-// fetching, or pushing over HTTP:
-//
-//   GET  /<repo>/info/refs?service=git-upload-pack     -> ref advertisement
-//   POST /<repo>/git-upload-pack                       -> fetch / clone
-//   POST /<repo>/git-receive-pack                      -> push
-//
-// We shell out to the real `git upload-pack` / `git receive-pack` binaries in
-// `--stateless-rpc` mode, which is exactly what git's own http-backend does.
-// Auth/authorization is handled by the caller (server.ts) before we get here.
+/* src/smart-http.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";

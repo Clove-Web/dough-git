@@ -1,18 +1,6 @@
-/* src/settings.ts */
-//
-// Per-account settings.
-//
-// Keyed by owner slug rather than by OIDC `sub`, because the slug is the
-// identity everything else in this application is keyed by (tokens.owner,
-// collaborators.slug) and users.ts guarantees it never changes once assigned.
-//
-// This is a separate table from `users` on purpose. rememberUser() rewrites the
-// user row on every login, and settings are not identity: mixing them would put
-// a login on the write path for preferences, and preferences on the write path
-// for a login.
-//
-// Kept deliberately short. A setting earns its place here by changing what the
-// server does, not by filling out a page.
+/* src/settings.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import { db, now } from "./db.ts";
 

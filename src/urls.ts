@@ -1,34 +1,11 @@
-/* src/urls.ts */
-//
-// URL validation, in one place, because these URLs are a security boundary.
-//
-// Two kinds of URL enter this application from a user, and both end up
-// somewhere dangerous:
-//
-//   * mirror links (git.ts) are handed to the *git binary* as a remote to
-//     contact, so a URL that isn't what it looks like becomes an outbound
-//     request to somewhere we didn't intend, or another git transport
-//     entirely (`ext::` runs a shell command).
-//   * the Discord webhook (notify.ts) is handed to fetch(), so an unchecked
-//     host makes the server into an SSRF probe for whatever it can reach.
-//
-// The defence in both cases is an allow-list of exact hosts rather than a
-// sanitiser: there is a fixed, small set of places these URLs are allowed to
-// point, so nothing else needs reasoning about. This is the same shape as
-// markdown.ts's scheme allow-list and git.ts's `safeSegment`.
-//
-// Every validator returns a normalised URL string or null. Callers must treat
-// null as "refuse", never as "use the raw value".
+/* src/urls.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 const MAX_URL = 400;
 
 const HOSTILE = /[\s\\<>"'`{}|^\x00-\x1f\x7f]/;
 
-// allowedParams names the query parameters a caller is willing to consider.
-// It is deliberately opt-in and empty by default, so every existing caller
-// keeps the blanket "no query string" rule. Naming a parameter here only gets
-// it past this gate — the caller still has to validate the value and rebuild
-// the query itself, so nothing user-controlled is passed through verbatim.
 function parseStrict(
   raw: string,
   allowedHosts: readonly string[],
@@ -57,8 +34,6 @@ function parseStrict(
     const seen = new Set<string>();
     for (const key of url.searchParams.keys()) {
       if (!allowedParams.includes(key)) return null;
-      // A repeated key is ambiguous rather than useful; refuse instead of
-      // silently picking one of the values.
       if (seen.has(key)) return null;
       seen.add(key);
     }
@@ -112,12 +87,6 @@ const DISCORD_HOSTS = [
 
 const WEBHOOK_PATH = /^\/api(?:\/v\d{1,3})?\/webhooks\/\d{1,32}\/[A-Za-z0-9._-]{1,200}$/;
 
-// The two Discord webhook parameters worth honouring, each pinned to the exact
-// shape its value may take. thread_id posts into an existing thread rather than
-// the parent channel; wait=true makes Discord answer 200 + the created message
-// instead of a bare 204, so a delivery that Discord rejects is reported as a
-// failure rather than passing silently. Both stay inside notify.ts's
-// `response.ok` check, which spans the whole 2xx range.
 const WEBHOOK_PARAMS: Record<string, RegExp> = {
   thread_id: /^\d{1,32}$/,
   wait: /^(?:true|false)$/,
@@ -130,9 +99,6 @@ export function discordWebhookUrl(raw: string): string | null {
   if (!url) return null;
   if (!WEBHOOK_PATH.test(url.pathname)) return null;
 
-  // Rebuild the query from validated values in a fixed order rather than
-  // reusing url.search, so the stored URL is canonical and nothing the user
-  // typed reaches fetch() unexamined.
   const params = new URLSearchParams();
   for (const name of WEBHOOK_PARAM_NAMES) {
     const value = url.searchParams.get(name);

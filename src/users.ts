@@ -1,16 +1,6 @@
-/* src/users.ts */
-//
-// The user directory: everyone who has ever signed in via PocketID.
-//
-// This exists for two reasons. Repos are namespaced by an owner *slug*, so the
-// mapping from OIDC `sub` to slug has to be stable and unique — deriving it
-// fresh on every login would let two accounts collide into one namespace and
-// push to each other's repos. And the profile pages need a name and avatar for
-// an owner even when that person isn't the one browsing.
-//
-// Nothing here is authoritative for access control on its own: the slug stored
-// here is what a session and a token are bound to, and git.ts still owns what a
-// safe path segment looks like.
+/* src/users.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import { db, now } from "./db.ts";
 import { ownerSlug } from "./git.ts";

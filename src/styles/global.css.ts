@@ -1,6 +1,5 @@
-/* Global element styling — the parts that must target bare elements (html,
- * body, a, table, pre) rather than a generated class, so they live in
- * globalStyle exactly like the personal site's base.css.ts.
+/* src/styles/global.css.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
  */
 
 import { globalStyle } from "@vanilla-extract/css";
@@ -30,11 +29,6 @@ globalStyle("a", {
 
 globalStyle("a:hover", { textDecoration: "underline" });
 
-// Self-hosted pixel cursor (dark art only, since dough-git is always dark).
-// The PNGs are pixelarticons' free cursors, downloaded from
-// https://pixelarticons.com/free/cursors/ and committed to public/cursors/ —
-// they are NOT part of the pixelarticons npm package that src/icons.ts reads,
-// so they have to travel with the repo. The trailing numbers are the hotspot.
 globalStyle("a, button", {
   cursor: "url('/static/cursors/pointer-dark.png') 12 1, pointer",
 });
@@ -69,14 +63,6 @@ globalStyle("pre", {
   overflowX: "auto",
 });
 
-/* Form controls. Native buttons/inputs come with their own light-mode chrome
- * (system font, rounded corners, grey gradient) which reads as foreign against
- * the dark theme, so restyle them onto the same bordered-box idiom the `tab`
- * and `badge` classes use.
- */
-
-// Text-ish inputs only — a checkbox gets its own treatment below, since border
-// and background on one replace the box itself rather than framing it.
 const FIELDS = [
   'input[type="text"]',
   'input[type="url"]',
@@ -90,7 +76,6 @@ const FIELDS = [
 
 const CONTROLS = ["button", ...FIELDS];
 
-/** sel(["button", "select"], ":hover") => "button:hover, select:hover" */
 const sel = (sels: string[], suffix = "") =>
   sels.map((s) => s + suffix).join(", ");
 
@@ -104,8 +89,6 @@ globalStyle(sel(CONTROLS), {
 });
 
 globalStyle("button", {
-  // Buttons are always [icon, label], so centre them as a row rather than
-  // relying on the SVG's inline baseline.
   display: "inline-flex",
   alignItems: "center",
   gap: "0.35rem",
@@ -130,7 +113,6 @@ globalStyle(sel(FIELDS, "::placeholder"), { color: vars.textFaint });
 
 globalStyle(sel(FIELDS, ":hover"), { borderColor: vars.textFaint });
 
-// One focus treatment across the set, so tabbing through a form is consistent.
 globalStyle(sel(CONTROLS, ":focus-visible"), {
   outline: `1px solid ${vars.accent}`,
   outlineOffset: "1px",

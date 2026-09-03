@@ -1,12 +1,6 @@
-/* src/tokens.ts */
-//
-// SQLite-backed git access tokens, managed from the browser.
-//
-// Only token *hashes* are stored; the plaintext is shown once at creation.
-// Every token is bound to the owner slug of whoever minted it, which is what
-// lets the transport refuse a push into somebody else's namespace. There is no
-// instance-wide credential: a token is always somebody in particular, and what
-// that somebody may reach is decided in access.ts.
+/* src/tokens.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import { randomBytes, createHash } from "node:crypto";
 import { db, now, hasColumn } from "./db.ts";
@@ -27,9 +21,6 @@ if (!hasColumn("tokens", "owner")) {
   db.exec("ALTER TABLE tokens ADD COLUMN owner TEXT");
 }
 
-// Every git request that carries credentials looks a token up by hash, so this
-// is the hottest read in the application and the one that must not become a
-// table scan as the token count grows.
 db.exec("CREATE INDEX IF NOT EXISTS tokens_hash ON tokens (hash)");
 
 function sha256(value: string): string {

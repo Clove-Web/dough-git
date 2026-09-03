@@ -1,14 +1,9 @@
-/* Comic Code — the same paid display face used across the other doughmination
- * sites (see the personal site's fonts.css.ts). Applied to the `font` token
- * (UI chrome: nav, headers, labels) — `mono` stays a real monospace stack in
- * theme.css.ts since dough-git aligns commit hashes, file sizes and tree
- * listings in columns, which Comic Code's metrics aren't built for.
+/* src/styles/fonts.css.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
  */
 
 import { globalFontFace } from "@vanilla-extract/css";
 
-// Exported so the server can name this origin in font-src. A CSP of 'self'
-// alone blocks every face below, and the page silently falls back to system-ui.
 export const FONT_ORIGIN = "https://m.doughmination.gay";
 
 const CDN = `${FONT_ORIGIN}/f`;

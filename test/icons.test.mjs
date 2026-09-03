@@ -1,7 +1,6 @@
-/* test/icons.test.mjs */
-
-// Pins the contract views.ts relies on from icon().
-// Run:  node --experimental-strip-types test/icons.test.mjs
+/* test/icons.test.mjs
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import { icon } from "../src/icons.ts";
 
@@ -11,7 +10,6 @@ function check(label, cond) {
   if (!cond) failures++;
 }
 
-// The pixelarticons names dough-git actually uses.
 const names = [
   "git-branch",
   "git-commit",

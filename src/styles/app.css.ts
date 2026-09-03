@@ -1,7 +1,5 @@
-/* src/styles/app.css.ts
- *
- * Component classes. Each is a generated, scoped class name (zero runtime).
- * Imported as a single `classes` object by the HTML views.
+/* src/styles/app.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
  */
 
 import { globalStyle, style } from "@vanilla-extract/css";
@@ -19,8 +17,6 @@ const readme = style({
 export const classes = {
   readme,
 
-  // Icon-then-label. Used anywhere an icon() sits next to text and needs to
-  // ride the text baseline with consistent spacing rather than a literal space.
   withIcon: style({
     display: "inline-flex",
     alignItems: "center",
@@ -396,7 +392,6 @@ globalStyle(`${readme} blockquote`, {
   color: vars.textMuted,
 });
 
-// GitHub-style alerts: one accent colour per kind.
 const alertColor = {
   note: "#4493f8",
   tip: "#3fb950",
@@ -475,7 +470,6 @@ globalStyle(`${readme} th[data-align="right"], ${readme} td[data-align="right"]`
 
 globalStyle(`${readme} del`, { color: vars.textDim });
 
-// Inline pixel icons: crispEdges keeps the pixel grid sharp at any size.
 globalStyle(".icon", {
   display: "inline-block",
   verticalAlign: "middle",

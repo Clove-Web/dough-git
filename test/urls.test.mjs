@@ -1,11 +1,5 @@
 /* test/urls.test.mjs
- *
- * Tests for src/urls.ts, which is a security boundary rather than a formatting
- * helper: a mirror URL that gets past this is handed to the git binary as a
- * remote to contact, and a webhook URL that gets past it is handed to fetch().
- * So the hostile cases matter more than the valid ones.
- *
- * Run:  node --experimental-strip-types test/urls.test.mjs
+ * LICENCED DASL-1.0 (c) Clove Twilight
  */
 
 import {
@@ -80,8 +74,6 @@ console.log("\n-- port / query / fragment --");
 no("github", "https://github.com:8080/user/repo", "explicit port");
 no("github", "https://github.com:22/user/repo", "explicit ssh port");
 no("github", "https://github.com/user/repo?x=1", "query string");
-// The webhook validator opts into thread_id and wait; mirrors opt into
-// nothing, so those names must be just as dead here as any other.
 no("github", "https://github.com/user/repo?thread_id=17", "an opted-in webhook parameter");
 no("github", "https://github.com/user/repo?wait=true", "a webhook boolean");
 no("github", "https://github.com/user/repo#frag", "fragment");
@@ -133,8 +125,6 @@ check(
   discordWebhookUrl("https://ptb.discord.com/api/webhooks/1/tok") !== null,
 );
 
-// thread_id and wait are the only query parameters allowed through, and only
-// with these exact value shapes. Anything else must still be refused outright.
 check("accepts thread_id", discordWebhookUrl(`${W}?thread_id=17`) === `${W}?thread_id=17`);
 check("accepts wait=true", discordWebhookUrl(`${W}?wait=true`) === `${W}?wait=true`);
 check("accepts wait=false", discordWebhookUrl(`${W}?wait=false`) === `${W}?wait=false`);

@@ -1,15 +1,6 @@
-/* src/access.ts */
-//
-// Who may read and write a repository.
-//
-// Two things decide it. The filesystem marker (git.ts) says whether a repo is
-// world-readable, and this table says who else — beyond the owner — was invited
-// in. The owner always has write; nobody else gets write without being named
-// here; and a private repo is invisible to everyone who isn't.
-//
-// Every entry addresses a repo by `owner/name` rather than by a row id, because
-// that is the identity the filesystem already uses. Deleting a repo drops its
-// rows (see dropRepoAccess), so a later repo of the same name starts clean.
+/* src/access.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import { db, now } from "./db.ts";
 import type { RepoRef } from "./git.ts";
@@ -25,9 +16,6 @@ db.exec(`
   );
 `);
 
-// The primary key answers "who may touch this repo", which is the question the
-// transport asks. sharedWith() asks the mirror image — "which repos may this
-// person touch" — on every repo listing, and that one needs its own index.
 db.exec("CREATE INDEX IF NOT EXISTS collaborators_slug ON collaborators (slug)");
 
 export type Level = "read" | "write";

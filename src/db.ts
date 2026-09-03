@@ -1,10 +1,6 @@
-/* src/db.ts */
-//
-// The one SQLite handle, shared by the users, tokens and collaborators tables.
-//
-// Uses Node's built-in `node:sqlite` (run with --experimental-sqlite), so there
-// is no native module to compile. Both tables are small and only ever touched
-// on login, token management, and git auth, so synchronous access is fine.
+/* src/db.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";

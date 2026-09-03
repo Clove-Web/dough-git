@@ -1,7 +1,6 @@
-/* src/server.ts */
-//
-// HTTP entrypoint: wires the git smart-HTTP transport and the read-only viewer
-// onto one Hono app. Run with `npm start`.
+/* src/server.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import { Hono, type Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
@@ -454,10 +453,6 @@ app.post("/new", async (c) => {
   return c.redirect(`/${result.ref.owner}/${result.ref.name}/`);
 });
 
-// Route params are typed as possibly-absent on a generic Context. These routes
-// always define them, but reading them through one helper keeps that assumption
-// in a single place instead of scattering casts, and gives a missing param the
-// same "no such repo" answer as an unsafe one.
 function refFromPath(c: Context<Env>, nameParam: "name" | "repo"): RepoRef | null {
   const owner = c.req.param("owner");
   const name = c.req.param(nameParam);
@@ -474,10 +469,6 @@ function authChallenge(message = "authentication required"): Response {
   });
 }
 
-// The outcome of the transport gate. It carries the actor as well as the
-// verdict because verifying a token is a hash lookup *and* a `last_used`
-// write: re-deriving the actor afterwards would bill every clone and push for
-// two of each, and leave two places that could disagree about who is pushing.
 interface GitGate {
   response: Response | null;
   actor: string | null;
@@ -837,9 +828,6 @@ app.post("/:owner/:name/collaborators/remove", async (c) => {
   return c.redirect(`/${ref.owner}/${ref.name}/`);
 });
 
-// The profile README, read through exactly the same access rules as any other
-// repository. A private +dough stays invisible to everyone it was not shared
-// with, so a profile page can never show content the viewer could not clone.
 async function profileReadme(
   owner: string,
   viewer: string | null,
@@ -851,9 +839,6 @@ async function profileReadme(
   return headReadme(ref);
 }
 
-// The owner's repositories, minus the profile repo. +dough is machinery for
-// the page the visitor is already looking at, so listing it is noise; it keeps
-// its own repo page at /<owner>/+dough and is reachable from the profile.
 function ownedRepos(all: RepoSummary[], owner: string): RepoSummary[] {
   return all.filter((r) => r.owner === owner && !isProfileRepo(r.name));
 }
@@ -884,8 +869,6 @@ app.get("/:owner", async (c) => {
   );
 });
 
-// Registered ahead of /:owner/:name. safeName() refuses "+repos" as a
-// repository name, so this route and a repo page can never contend.
 app.get(`/:owner/${PROFILE_REPOS_PATH}`, async (c) => {
   const owner = c.req.param("owner");
   if (!safeRef(owner, "x")) return notFound(c);
@@ -906,6 +889,10 @@ app.get(`/:owner/${PROFILE_REPOS_PATH}`, async (c) => {
 });
 
 app.get("/:owner/:name", async (c) => {
+  if (c.req.param("name") === PROFILE_REPOS_PATH) {
+    return c.redirect(`/${c.req.param("owner")}/${PROFILE_REPOS_PATH}`, 301);
+  }
+
   const found = await viewable(c);
   if (!found) return notFound(c);
   const { ref, isPublic, access, refs, rev } = found;
@@ -1014,9 +1001,6 @@ app.post("/:owner/:name/mirrors/check", async (c) => {
   return c.redirect(`/${ref.owner}/${ref.name}/`);
 });
 
-// Recently Deleted is swept on a timer rather than only when somebody opens
-// the page, so MINIGIT_TRASH_DAYS is a retention window rather than a hint. The
-// interval is unref'd: it must never be the reason the process stays alive.
 const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 async function sweepTrash(): Promise<void> {

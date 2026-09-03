@@ -1,15 +1,6 @@
-/* src/auth.ts */
-//
-// Authentication.
-//
-//  * Browser login  -> PocketID (OIDC). The resulting identity is stored in a
-//    stateless, HMAC-signed session cookie; the account itself is recorded in
-//    the user directory (users.ts) so its owner slug is stable.
-//  * git clone/pull/push -> HTTP Basic auth. The password is a token; the
-//    username is the owner slug the token belongs to.
-//
-// Session and OAuth-transaction state live entirely in signed cookies, so there
-// is no server-side session store.
+/* src/auth.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import * as oidc from "openid-client";

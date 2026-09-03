@@ -1,13 +1,5 @@
 /* test/refs.test.mjs
- *
- * Tests for revision resolution and the repo description, against a real bare
- * repository with real branches and tags.
- *
- * The load-bearing case is the last group: `?h=` is attacker-supplied and ends
- * up in a git argv slot, so resolveRev has to be an allow-list rather than a
- * pattern check.
- *
- * Run:  node --experimental-strip-types test/refs.test.mjs
+ * LICENCED DASL-1.0 (c) Clove Twilight
  */
 
 import { execFile } from "node:child_process";

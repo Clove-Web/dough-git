@@ -1,9 +1,6 @@
-/* src/config.ts */
-//
-// Central configuration. Everything comes from environment variables. Repo
-// visibility is a filesystem marker plus a collaborator table, git auth is
-// per-user tokens minted in the browser, and browser sessions are stateless
-// signed cookies over a SQLite user directory.
+/* src/config.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 function optional(name: string, fallback: string): string {
   return process.env[name] ?? fallback;

@@ -1,15 +1,5 @@
 /* test/profile.test.mjs
- *
- * Tests for the "+" namespace and the profile README that rides on it.
- *
- * The load-bearing case is the first group. A leading "+" is what keeps the
- * route /<owner>/+repos from ever colliding with a repository, so the rule
- * "every + name is refused except the one profile repo" is a routing invariant
- * and not a cosmetic one: the moment safeRef accepts +repos, a repository can
- * shadow that page. The rest checks that a name the forge does accept survives
- * everything a normal repository survives — listing, trash, restore.
- *
- * Run:  node --experimental-strip-types test/profile.test.mjs
+ * LICENCED DASL-1.0 (c) Clove Twilight
  */
 
 import { execFile } from "node:child_process";
@@ -61,8 +51,6 @@ async function git(cwd, args) {
   return stdout;
 }
 
-// -- the "+" namespace --------------------------------------------------------
-
 console.log("-- the + namespace is reserved, with exactly one exception --");
 
 check("the profile repo is accepted", safeRef("clove", PROFILE_REPO) !== null);
@@ -85,12 +73,9 @@ check(
 );
 check("an owner may not use the + prefix", safeRef(PROFILE_REPO, "x") === null);
 
-// The pre-existing guarantees have to still hold.
 check("still refuses traversal", safeRef("clove", "../etc") === null);
 check("still refuses a dotfile name", safeRef("clove", ".ssh") === null);
 check("still accepts an ordinary name", safeRef("clove", "my-repo.v2") !== null);
-
-// -- headReadme ---------------------------------------------------------------
 
 console.log("\n-- the profile readme is read at HEAD --");
 
@@ -112,8 +97,6 @@ const found = await headReadme(ref);
 check("the readme is found at HEAD", found?.path === "README.md");
 check("...with its text", found?.text.includes("profile text."));
 
-// A repo with commits but no README is the case the profile page reports
-// differently from a missing repo, so it must come back as null, not throw.
 const plain = await createRepo("clove", "plain");
 check("a second repo is created", plain.ok === true);
 await git(work, ["push", "-q", refDir({ owner: "clove", name: "plain" }), "main:main"]);
@@ -125,19 +108,13 @@ check(
   (await headReadme({ owner: "clove", name: "plain" })) === null,
 );
 
-// -- listing ------------------------------------------------------------------
-
 console.log("\n-- listing ignores names the forge would refuse --");
 
-// A directory can be created by hand; listRepos must not surface one whose
-// name safeRef would reject, or the UI would link to a page that 404s.
 mkdirSync(join(root, "clove", "+bogus.git"), { recursive: true });
 const listed = (await listRepos()).map((r) => r.name).sort();
 check("the profile repo is listed by git.ts", listed.includes(PROFILE_REPO));
 check("a stray + directory is not", !listed.includes("+bogus"));
 check("ordinary repos are", listed.includes("plain"));
-
-// -- trash round-trip ---------------------------------------------------------
 
 console.log("\n-- the profile repo trashes and restores like any other --");
 

@@ -1,11 +1,6 @@
-// Tests for the README Markdown renderer.
-//
-// The security cases matter most: README content comes from anyone who can
-// push, and renders on pages that may be public, so the escape-first contract
-// in src/markdown.ts (no raw HTML through, scheme allowlist on URLs) is the
-// thing most worth pinning down.
-//
-// Run:  node --experimental-strip-types test/markdown.test.mjs
+/* test/markdown.test.mjs
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import { renderMarkdown, plainSummary } from "../src/markdown.ts";
 
@@ -276,6 +271,96 @@ check(
   "stray NUL bytes can't forge a stash placeholder",
   lacks("\x000\x00 text", "\x00"),
 );
+
+console.log("\n-- resource bounds (unbounded scans used to be quadratic) --");
+
+function timed(label, src, budgetMs) {
+  const t = process.hrtime.bigint();
+  let threw = null;
+  try {
+    renderMarkdown(src);
+  } catch (err) {
+    threw = err;
+  }
+  const ms = Number(process.hrtime.bigint() - t) / 1e6;
+  check(`${label} (${ms.toFixed(0)}ms, budget ${budgetMs}ms)`, threw === null && ms < budgetMs);
+}
+
+timed("200k unclosed [ does not go quadratic", "[".repeat(200_000), 3000);
+timed("200k unclosed ![ does not go quadratic", "![".repeat(100_000), 3000);
+timed("200k unclosed tag does not go quadratic", "<a ".repeat(66_000), 3000);
+timed("200k unclosed autolink stays linear", "<http://".repeat(25_000), 3000);
+timed("deep blockquote nesting does not overflow the stack", ">".repeat(50_000), 3000);
+timed("deep list nesting does not overflow the stack", "- ".repeat(50_000) + "x", 3000);
+
+check(
+  "an oversize document is truncated and says so",
+  has("x\n".repeat(200_000), "truncated for display"),
+);
+check(
+  "an ordinary document is not marked truncated",
+  lacks("# Title\n\nBody", "truncated for display"),
+);
+
+check("nested blockquotes still nest", has("> a\n>\n> > b", "<blockquote>\n<p>a</p>\n<blockquote>"));
+check("nested lists still nest", has("- a\n  - b", "<ul>\n<li>a\n<ul>\n<li>b"));
+check("autolinks still link", has("<https://example.com>", 'href="https://example.com"'));
+check("ordinary links still link", has("[x](https://example.com)", 'href="https://example.com"'));
+check("images still render", has("![alt](https://example.com/i.png)", '<img src="https://example.com/i.png"'));
+check("link titles still render", has('[x](https://a.com "t")', 'title="t"'));
+
+console.log("\n-- allowlisted html renders --");
+
+check("centered div", has('<div align="center">x</div>', '<div align="center">'));
+check("img with dimensions", has('<img src="l.png" width="200" height="9">', '<img src="l.png" width="200" height="9" loading="lazy">'));
+check("img is not wrapped in a stray p", lacks('<div align="center">\n<img src="l.png">\n</div>', "<p>"));
+check("centered heading is not wrapped in p", has('<h1 align="center">P</h1>', '<h1 align="center">P</h1>') && lacks('<h1 align="center">P</h1>', "<p>"));
+check("anchor round-trips with rel", has('<a href="https://x.com">t</a>', '<a href="https://x.com" rel="nofollow noopener noreferrer">t</a>'));
+check("details and summary", has("<details>\n<summary>s</summary>\n</details>", "<details>") && has("<details>\n<summary>s</summary>\n</details>", "<summary>s</summary>"));
+check("markdown inside a details block still renders", has("<details>\n<summary>s</summary>\n\n**b**\n\n</details>", "<strong>b</strong>"));
+check("picture and source", has('<picture>\n<source media="(prefers-color-scheme: dark)" srcset="d.png">\n</picture>', '<source media="(prefers-color-scheme: dark)" srcset="d.png">'));
+check("inline kbd stays inline", has("press <kbd>C</kbd>", "<p>press <kbd>C</kbd></p>"));
+check("html table", has('<table><tr><td align="right">1</td></tr></table>', '<td align="right">1</td>'));
+check("center", has("<center>c</center>", "<center>c</center>"));
+check("br and hr", has("a<br>b", "a<br>b") && has("<hr>", "<hr>"));
+check("backticked tag is still code, not markup", has("use `<div>` here", "<code>&lt;div&gt;</code>"));
+
+console.log("\n-- the allowlist is an allowlist --");
+
+check("iframe is dropped", lacks('<iframe src="https://e.com"></iframe>', "<iframe"));
+check("form and input are dropped", lacks('<form><input name="p"></form>', "<input"));
+check("style tag is dropped", lacks("<style>body{}</style>", "<style"));
+check("svg is dropped", lacks("<svg onload=alert(1)></svg>", "<svg"));
+check("base is dropped", lacks('<base href="//e.com/">', "<base"));
+check("event handlers never survive", lacks('<div onclick="alert(1)">x</div>', "onclick") && lacks("<img src=x onerror=alert(1)>", "onerror"));
+check("style attribute never survives", lacks('<div style="x:url(javascript:1)">x</div>', "style="));
+check("target never survives", lacks('<a href="https://x.com" target="_blank">t</a>', "target"));
+check("class and id never survive", lacks('<div class="c" id="i">x</div>', "class=") && lacks('<div class="c" id="i">x</div>', "id="));
+check("javascript: href is dropped, text kept", lacks('<a href="javascript:alert(1)">t</a>', "javascript:") && has('<a href="javascript:alert(1)">t</a>', "t"));
+check("data: src is dropped", lacks('<img src="data:text/html;base64,PHN2Zz4=">', "data:"));
+check("protocol-relative src is dropped", lacks('<img src="//evil.com/x.png">', "evil.com"));
+check("javascript: in srcset is dropped", lacks('<source srcset="javascript:alert(1)">', "javascript:"));
+check("one bad srcset candidate drops the attribute", lacks('<source srcset="a.png 1x, javascript:alert(1) 2x">', "javascript:"));
+check("align only takes known values", lacks('<div align="center\" onclick=\"alert(1)">x</div>', "onclick"));
+check("an unknown attribute is dropped", lacks('<div data-x="1">y</div>', "data-x"));
+
+check("script content is dropped, not shown as text", has("<script>alert(2)</script>ok", "<p>ok</p>"));
+check("style content is dropped", has("<style>body{x}</style>ok", "<p>ok</p>"));
+check("a multi-line script block is dropped whole", lacks("a\n<script>\nalert(1)\n</script>\nb", "alert"));
+check("an unclosed script swallows nothing after it", has("a\n<script>\nalert(1)", "<p>a</p>"));
+check("a mid-line script is dropped, surrounds kept", has("hi <script>alert(1)</script> there", "hi") && lacks("hi <script>alert(1)</script> there", "alert"));
+check("fenced code still shows tags literally", has("```\n<script>x</script>\n```", "&lt;script&gt;x&lt;/script&gt;"));
+check("inline code still shows tags literally", has("use `<script>` here", "<code>&lt;script&gt;</code>"));
+
+console.log("\n-- html is balanced, so a readme cannot escape its container --");
+
+check("an unclosed tag is closed", has('<div align="center">', "</div>"));
+check("unclosed nesting closes inside out", has("<div><span><b>", "<div><span><b></b></span></div>"));
+check("a stray closing tag is dropped", lacks("</div>", "</div>"));
+check("a stray page tag is dropped entirely", lacks("</article></body>", "</article>") && lacks("</article></body>", "</body>"));
+check("closers cannot outnumber openers", has("<div>a</div></div></div>", "<div>a</div>") && lacks("<div>a</div></div></div>", "</div></div>"));
+check("the internal tag markers never reach output", lacks("<div>x</div>", "\u0001") && lacks("<div>x</div>", "\u0002"));
+check("a forged marker in source is inert", lacks("\u0001<script>alert(1)</script>\u0002", "<script"));
 
 console.log(failures === 0 ? "\nALL PASSED" : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

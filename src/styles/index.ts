@@ -1,6 +1,6 @@
-// Style entrypoint. Importing this pulls in the theme + global rules (side
-// effects) and exposes the component class names. The esbuild + vanilla-extract
-// build turns all of this into one static CSS file at compile time.
+/* src/styles/index.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import "./fonts.css.ts";
 import "./theme.css.ts";

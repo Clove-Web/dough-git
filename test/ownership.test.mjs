@@ -1,10 +1,5 @@
 /* test/ownership.test.mjs
- *
- * Tests for per-user token ownership: who a token acts as. This is the rule
- * that keeps one account out of another's namespace, so it's worth pinning down
- * directly rather than only through the transport.
- *
- * Run:  node --experimental-sqlite --experimental-strip-types test/ownership.test.mjs
+ * LICENCED DASL-1.0 (c) Clove Twilight
  */
 
 import { mkdtempSync, rmSync } from "node:fs";

@@ -1,16 +1,6 @@
-/* src/mirror.ts */
-//
-// Backup / mirror status: does the copy on GitHub or Codeberg still exist, and
-// do its refs match this one?
-//
-// This is a monitor, not a synchroniser. Nothing here pushes, fetches objects,
-// creates, repairs or deletes anything on a remote. It reads `git ls-remote`
-// and compares SHAs, and that is the whole of it.
-//
-// Cached in SQLite rather than on the filesystem, unlike the links themselves
-// (git.ts). A check result is derived, ephemeral, and safe to lose: dropping it
-// costs one re-check. That is the definition of application metadata, so it
-// lives on the SQLite side of the line and is cleared through repometa.ts.
+/* src/mirror.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import { db, now } from "./db.ts";
 import {

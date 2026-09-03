@@ -1,9 +1,5 @@
-/* Design tokens for dough-git.
- *
- * Same shape as the personal site's themes.css.ts: a global theme *contract*
- * maps token names to literal CSS custom properties (surfaceHi => var(--
- * surface-hi)), and createGlobalTheme binds them on :root. Palette is the site's
- * pink dark-trans theme so dough-git reads as part of the same family.
+/* src/styles/theme.css.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
  */
 
 import {

@@ -1,11 +1,6 @@
-// End-to-end test of the git smart-HTTP transport.
-//
-// Stands up a tiny Node HTTP server backed by src/smart-http.ts, seeds a real
-// bare repo, then uses the *actual git client* to clone from it and push to it,
-// asserting the round trip works. This validates the trickiest part of the
-// project (pkt-line framing + upload-pack/receive-pack RPC) against real git.
-//
-// Run:  node --experimental-strip-types test/transport.test.mjs
+/* test/transport.test.mjs
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import { createServer } from "node:http";
 import { Readable } from "node:stream";

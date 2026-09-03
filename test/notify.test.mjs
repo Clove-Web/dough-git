@@ -1,14 +1,5 @@
 /* test/notify.test.mjs
- *
- * Tests for Discord notifications.
- *
- * Two things matter more than the message wording. A notification must never
- * be able to break or delay a git operation, and the webhook URL is a
- * credential that must never reach a log line. Both are asserted directly.
- *
- * fetch is stubbed throughout: these tests never touch the network.
- *
- * Run:  node --experimental-sqlite --experimental-strip-types test/notify.test.mjs
+ * LICENCED DASL-1.0 (c) Clove Twilight
  */
 
 import { execFile } from "node:child_process";

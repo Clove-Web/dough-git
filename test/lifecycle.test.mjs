@@ -1,13 +1,5 @@
 /* test/lifecycle.test.mjs
- *
- * Tests for the repository lifecycle: soft delete into <repos>/.trash, name
- * reservation while a copy is recoverable, restore, and permanent purge.
- *
- * This is the part of the application that moves and destroys real directories,
- * so the hostile cases (traversal out of the trash root, collisions) are
- * asserted directly rather than inferred from the routes that call it.
- *
- * Run:  node --experimental-sqlite --experimental-strip-types test/lifecycle.test.mjs
+ * LICENCED DASL-1.0 (c) Clove Twilight
  */
 
 import { execFile } from "node:child_process";
@@ -184,9 +176,6 @@ check("the expired entry was purged", purged.some((e) => e.name === "ancient"));
 check("the fresh entry was kept", (await listTrash("alice")).some((e) => e.name === "recent"));
 check("expired directory really gone", !existsSync(join(trashOf("alice"), oldEntry.entry)));
 
-// purgeExpired only ever sweeps the owner being looked at, so an owner who
-// never opens their own Recently Deleted page would keep expired copies for
-// ever. purgeAllExpired is what makes the retention window a real one.
 const bob = { owner: "bob", name: "forgotten" };
 await seed(bob);
 const bobEntry = await trashIt(bob, Math.floor(Date.now() / 1000) - 40 * 86400);

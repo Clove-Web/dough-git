@@ -1,7 +1,6 @@
-/* src/views.ts */
-//
-// HTML rendering. Class names come from the compiled Vanilla Extract styles
-// (src/styles). Repos are addressed GitHub-style as owner/name throughout.
+/* src/views.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import { config } from "./config.ts";
 import { classes as c } from "./styles/index.ts";
@@ -224,7 +223,6 @@ ${createForm}
   return layout({ title: config.title, user, body, path: "/" });
 }
 
-// How many repositories the profile page shows before deferring to /+repos.
 const PROFILE_PREVIEW = 6;
 
 function ownerName(owner: string, profile: UserRow | null): string {
@@ -250,7 +248,6 @@ function ownerHead(owner: string, profile: UserRow | null): string {
     </section>`;
 }
 
-// Same shape as the per-repo tabs, so an owner's pages navigate like a repo's.
 function ownerTabs(owner: string, active: "profile" | "repos"): string {
   const tab = (id: string, label: string, glyph: string, href: string) =>
     `<a class="${c.tab}${id === active ? " " + c.tabActive : ""}" href="${href}">${icon(glyph)}${label}</a>`;
@@ -274,10 +271,6 @@ export function profilePage(opts: {
   const more = opts.repos.length - preview.length;
   const profileHref = `/${esc(opts.owner)}/${esc(PROFILE_REPO)}/`;
 
-  // The profile README is the page's headline when there is one. The three
-  // "no README" cases are only shown to the owner — a visitor has no use for
-  // them and they would read as an empty section — and they are kept distinct
-  // because the fix differs: create the repo, or push a README into it.
   const readmeSection = opts.readme
     ? `    <article class="${c.readme}">
 ${renderMarkdown(opts.readme.text)}

@@ -1,9 +1,9 @@
-/* src/icons.ts */
+/* src/icons.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
-// Icons are read from the installed pixelarticons package (MIT); none copied in.
 import { getIconSvg } from "pixelarticons";
 
-// Parsed icon source, cached so each file is read once per process.
 const cache = new Map<string, { viewBox: string; body: string }>();
 
 function parse(name: string): { viewBox: string; body: string } {
@@ -30,7 +30,6 @@ function parse(name: string): { viewBox: string; body: string } {
   return parsed;
 }
 
-// Render one pixelarticons icon (kebab-case name) as an inline SVG string.
 export function icon(name: string, size = 16): string {
   const { viewBox, body } = parse(name);
   return `<svg class="icon" viewBox="${viewBox}" width="${size}" height="${size}" aria-hidden="true">${body}</svg>`;

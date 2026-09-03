@@ -1,16 +1,6 @@
-/* src/notify.ts */
-//
-// Discord notifications for the three things this forge actually has:
-// a repository appearing, a repository being deleted, and commits arriving.
-//
-// Deliberately not an event bus. There are three events and four call sites, so
-// an abstraction over them would be more code than the thing it abstracts, and
-// harder to follow. Each function below is called explicitly from the route or
-// hook that knows the event happened.
-//
-// The hard rule for this whole module: **a notification must never fail, delay
-// or otherwise affect a git operation.** Every entry point catches everything,
-// nothing is awaited by a request handler, and delivery has a hard timeout.
+/* src/notify.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import {
   refSlug,

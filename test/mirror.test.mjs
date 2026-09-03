@@ -1,15 +1,5 @@
 /* test/mirror.test.mjs
- *
- * Tests for backup/mirror status: parsing ls-remote, comparing refs, deciding
- * a verdict, classifying transport failures, and — most importantly — proving
- * the hardened remote git helper cannot be talked into anything else.
- *
- * The classifier cases use the exact stderr the two forges were measured to
- * produce, so the difference between them (GitHub says "Repository not found";
- * Codeberg answers a missing repo with a credential challenge, making private
- * and missing indistinguishable) is pinned here rather than remembered.
- *
- * Run:  node --experimental-sqlite --experimental-strip-types test/mirror.test.mjs
+ * LICENCED DASL-1.0 (c) Clove Twilight
  */
 
 import { execFile } from "node:child_process";

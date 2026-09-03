@@ -1,10 +1,5 @@
 /* test/access.test.mjs
- *
- * Tests for who may read and write a repository. This is the rule that makes
- * "private" mean something on a multi-user instance, so each case is asserted
- * directly rather than inferred from the routes that call it.
- *
- * Run:  node --experimental-sqlite --experimental-strip-types test/access.test.mjs
+ * LICENCED DASL-1.0 (c) Clove Twilight
  */
 
 import { mkdtempSync, rmSync } from "node:fs";

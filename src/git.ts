@@ -1,10 +1,6 @@
-/* src/git.ts */
-//
-// Read-only helpers for the web viewer + repo management. Everything here shells
-// out to the git CLI against bare repositories under config.reposRoot.
-//
-// Repos are namespaced GitHub-style: <reposRoot>/<owner>/<name>.git, addressed
-// as `owner/name`. A RepoRef carries that identity through the whole module.
+/* src/git.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -49,24 +45,8 @@ function safeSegment(s: string): boolean {
   return SEGMENT.test(s) && !s.startsWith(".") && !s.includes("..");
 }
 
-// The "+" namespace.
-//
-// A leading "+" marks a name the forge owns rather than the user. It buys two
-// things at once: route segments like /:owner/+repos can never collide with a
-// real repository, and the profile repo cannot be created by accident or
-// squatted by someone typing a plausible name.
-//
-// Exactly one "+" name is a real repository — PROFILE_REPO, whose README is
-// rendered on its owner's profile page. Every other "+" name is refused
-// everywhere a name is accepted, so `git push` cannot conjure one and neither
-// can the create form. "+" is not allowed anywhere else in a name, which keeps
-// the prefix a namespace marker rather than a character.
 export const PROFILE_REPO = "+dough";
 
-// The owner-level repositories page lives at /<owner>/+repos. It is a route,
-// not a repository, and it is deliberately spelled with the reserved prefix:
-// safeName() refuses every "+" name but PROFILE_REPO, so no repository can ever
-// exist that would answer to this URL.
 export const PROFILE_REPOS_PATH = "+repos";
 
 const NAME_SEGMENT = /^[A-Za-z0-9._+-]+$/;
@@ -370,12 +350,6 @@ export async function purgeExpired(owner: string): Promise<TrashEntry[]> {
   return purged;
 }
 
-// Retention across every owner.
-//
-// purgeExpired() only sweeps the owner whose page is being rendered, which
-// makes MINIGIT_TRASH_DAYS a promise that is only kept for people who happen to
-// visit. This is the sweep the server runs on a timer so the retention window
-// means what it says.
 export async function purgeAllExpired(): Promise<TrashEntry[]> {
   if (config.trashDays <= 0) return [];
 
@@ -418,6 +392,43 @@ export interface RepoSummary {
   isPublic: boolean;
 }
 
+const LIST_CONCURRENCY = 16;
+
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+
+  const worker = async (): Promise<void> => {
+    for (let i = next++; i < items.length; i = next++) {
+      out[i] = await fn(items[i]!);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+  return out;
+}
+
+async function summarise(ref: RepoRef): Promise<RepoSummary | null> {
+  const dir = refDir(ref);
+  try {
+    const [description, head, lastCommit, isPublic] = await Promise.all([
+      readDescription(dir),
+      headBranch(dir),
+      lastCommitTime(dir),
+      isRepoPublic(ref),
+    ]);
+    return { owner: ref.owner, name: ref.name, description, head, lastCommit, isPublic };
+  } catch {
+    return null;
+  }
+}
+
 export async function listRepos(): Promise<RepoSummary[]> {
   let owners: string[];
   try {
@@ -426,7 +437,7 @@ export async function listRepos(): Promise<RepoSummary[]> {
     return [];
   }
 
-  const repos: RepoSummary[] = [];
+  const refs: RepoRef[] = [];
   for (const owner of owners) {
     if (!safeSegment(owner)) continue;
     let entries: string[];
@@ -439,21 +450,13 @@ export async function listRepos(): Promise<RepoSummary[]> {
       if (!entry.endsWith(".git")) continue;
       const name = entry.replace(/\.git$/, "");
       if (!safeName(name)) continue;
-      const ref: RepoRef = { owner, name };
-      const dir = refDir(ref);
-      try {
-        repos.push({
-          owner,
-          name: ref.name,
-          description: await readDescription(dir),
-          head: await headBranch(dir),
-          lastCommit: await lastCommitTime(dir),
-          isPublic: await isRepoPublic(ref),
-        });
-      } catch {
-      }
+      refs.push({ owner, name });
     }
   }
+
+  const repos = (await mapLimit(refs, LIST_CONCURRENCY, summarise)).filter(
+    (r): r is RepoSummary => r !== null,
+  );
 
   repos.sort((a, b) => (b.lastCommit ?? 0) - (a.lastCommit ?? 0));
   return repos;
@@ -922,10 +925,6 @@ export async function readme(ref: RepoRef, refspec: string): Promise<Readme | nu
   return { path: hit.name, text: content.text };
 }
 
-// The README at a repo's default branch, for callers that want it without
-// caring which revision they are on. tree() already swallows a bad refspec and
-// returns nothing, so an empty repo, a dangling HEAD and a repo with no README
-// all arrive here as the same null.
 export async function headReadme(ref: RepoRef): Promise<Readme | null> {
   const refs = await listRefs(ref);
   if (refs.branches.length === 0) return null;

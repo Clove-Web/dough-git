@@ -1,18 +1,6 @@
-/* src/markdown.ts */
-//
-// A small, deliberately safe Markdown renderer for repository READMEs.
-//
-// Why hand-rolled rather than a library: README content is attacker-controlled
-// — anyone who can push, on a repo that may be public — so this renderer is
-// escape-first. Every character is HTML-escaped before any markup is produced,
-// raw HTML from the source is never passed through, and link/image URLs go
-// through a scheme allowlist. Injection is impossible by construction instead
-// of depending on a sanitiser staying in step with a parser.
-//
-// Covers the README subset: ATX/setext headings, fenced and indented code,
-// blockquotes, nested and task lists, GFM tables, rules, images, links,
-// autolinks, emphasis, inline code, hard line breaks. Raw HTML blocks are
-// dropped rather than shown as escaped source.
+/* src/markdown.ts
+ * LICENCED DASL-1.0 (c) Clove Twilight
+ */
 
 import { icon } from "./icons.ts";
 
@@ -23,6 +11,13 @@ export function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+const MAX_LABEL = 400;
+const MAX_URL_PARTS = 500;
+const MAX_ATTRS = 400;
+const MAX_COMMENT = 1000;
+const MAX_NEST = 24;
+const MAX_RENDER_CHARS = 256 * 1024;
 
 type Stash = string[];
 
@@ -53,6 +48,208 @@ function linkAttrs(href: string): string {
   return ABSOLUTE.test(href) ? ` rel="nofollow noopener noreferrer"` : "";
 }
 
+const VOID_HTML = new Set(["br", "hr", "img", "source", "wbr"]);
+
+const HTML_ATTRS: Record<string, readonly string[]> = {
+  a: ["href", "title"],
+  img: ["src", "alt", "title", "width", "height", "align"],
+  picture: [],
+  source: ["src", "srcset", "media", "type"],
+  div: ["align"],
+  p: ["align"],
+  span: [],
+  center: [],
+  h1: ["align"],
+  h2: ["align"],
+  h3: ["align"],
+  h4: ["align"],
+  h5: ["align"],
+  h6: ["align"],
+  table: ["align"],
+  thead: [],
+  tbody: [],
+  tfoot: [],
+  tr: [],
+  th: ["align", "colspan", "rowspan"],
+  td: ["align", "colspan", "rowspan"],
+  ul: [],
+  ol: ["start"],
+  li: [],
+  dl: [],
+  dt: [],
+  dd: [],
+  blockquote: ["cite"],
+  pre: [],
+  code: [],
+  kbd: [],
+  samp: [],
+  b: [],
+  strong: [],
+  i: [],
+  em: [],
+  u: [],
+  s: [],
+  del: [],
+  ins: [],
+  mark: [],
+  sub: [],
+  sup: [],
+  small: [],
+  br: [],
+  hr: [],
+  wbr: [],
+  details: ["open"],
+  summary: [],
+  figure: [],
+  figcaption: [],
+};
+
+const RAW_TEXT = /^\s{0,3}<(script|style|textarea)(?=[\s/>])/i;
+
+const RAW_TEXT_INLINE = new RegExp(
+  `&lt;(script|style|textarea)(?:(?!&gt;)[\\s\\S]){0,${MAX_ATTRS}}?&gt;` +
+    `(?:(?!&lt;/)[\\s\\S]){0,${MAX_RENDER_CHARS}}?&lt;/\\1\\s*&gt;`,
+  "gi",
+);
+
+const ALIGN_VALUE = /^(?:left|center|right|justify)$/i;
+const DIMENSION_VALUE = /^\d{1,4}(?:%|px)?$/i;
+const COUNT_VALUE = /^\d{1,4}$/;
+const MEDIA_VALUE = /^[a-zA-Z0-9 ()\-:,.]{1,100}$/;
+const MIME_VALUE = /^[a-zA-Z0-9.+-]{1,40}\/[a-zA-Z0-9.+-]{1,40}$/;
+
+const HTML_TAG = new RegExp(
+  `&lt;(/?)([a-zA-Z][a-zA-Z0-9]{0,14})` +
+    `((?:\\s(?:(?!&gt;)[\\s\\S]){0,${MAX_ATTRS}}?)?)\\s*/?&gt;`,
+  "g",
+);
+
+const HTML_ATTR = new RegExp(
+  `([a-zA-Z][a-zA-Z0-9-]{0,19})` +
+    `(?:\\s*=\\s*(?:&quot;((?:(?!&quot;)[\\s\\S]){0,${MAX_LABEL}})&quot;` +
+    `|'([^']{0,${MAX_LABEL}})'` +
+    `|([^\\s&]{1,${MAX_LABEL}})))?`,
+  "g",
+);
+
+function srcsetValue(raw: string): string | null {
+  const parts = raw.split(",").map((c) => c.trim()).filter(Boolean);
+  if (parts.length === 0 || parts.length > 16) return null;
+  const rebuilt: string[] = [];
+  for (const part of parts) {
+    const [url, ...rest] = part.split(/\s+/);
+    const safe = url ? safeUrl(url) : null;
+    if (!safe) return null;
+    if (rest.length > 1) return null;
+    if (rest.length === 1 && !/^\d{1,4}(?:w|x)$/.test(rest[0]!)) return null;
+    rebuilt.push(rest.length ? `${safe} ${rest[0]}` : safe);
+  }
+  return rebuilt.join(", ");
+}
+
+function attrValue(name: string, raw: string | undefined): string | null {
+  switch (name) {
+    case "href":
+    case "src":
+    case "cite":
+      return raw === undefined ? null : safeUrl(raw);
+    case "srcset":
+      return raw === undefined ? null : srcsetValue(raw);
+    case "align":
+      return raw !== undefined && ALIGN_VALUE.test(raw) ? raw.toLowerCase() : null;
+    case "width":
+    case "height":
+      return raw !== undefined && DIMENSION_VALUE.test(raw) ? raw : null;
+    case "colspan":
+    case "rowspan":
+    case "start":
+      return raw !== undefined && COUNT_VALUE.test(raw) ? raw : null;
+    case "media":
+      return raw !== undefined && MEDIA_VALUE.test(raw) ? raw : null;
+    case "type":
+      return raw !== undefined && MIME_VALUE.test(raw) ? raw : null;
+    case "alt":
+    case "title":
+      return raw ?? "";
+    case "open":
+      return "";
+    default:
+      return null;
+  }
+}
+
+function rebuildTag(closing: string, rawName: string, rawAttrs: string): string {
+  const name = rawName.toLowerCase();
+  const allowed = HTML_ATTRS[name];
+  if (!allowed) return "";
+  if (closing) return VOID_HTML.has(name) ? "" : `\x01</${name}>\x02`;
+
+  let out = `<${name}`;
+  let href = "";
+  HTML_ATTR.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = HTML_ATTR.exec(rawAttrs)) !== null) {
+    if (m[0] === "") {
+      HTML_ATTR.lastIndex++;
+      continue;
+    }
+    const attr = m[1]!.toLowerCase();
+    if (!allowed.includes(attr)) continue;
+    const value = attrValue(attr, m[2] ?? m[3] ?? m[4]);
+    if (value === null) continue;
+    if (attr === "href") href = value;
+    out += attr === "open" ? " open" : ` ${attr}="${value}"`;
+  }
+
+  if (name === "a" && href) out += linkAttrs(href);
+  if (name === "img") out += ' loading="lazy"';
+
+  return `\x01${out}>\x02`;
+}
+
+function balanceHtml(html: string): string {
+  const open: string[] = [];
+  let out = "";
+  let i = 0;
+
+  while (i < html.length) {
+    const start = html.indexOf("\x01", i);
+    if (start === -1) {
+      out += html.slice(i);
+      break;
+    }
+    const end = html.indexOf("\x02", start);
+    if (end === -1) {
+      out += html.slice(i);
+      break;
+    }
+
+    out += html.slice(i, start);
+    const tag = html.slice(start + 1, end);
+    i = end + 1;
+
+    const name = /^<\/?([a-z0-9]+)/.exec(tag)?.[1] ?? "";
+    if (VOID_HTML.has(name)) {
+      out += tag;
+      continue;
+    }
+    if (!tag.startsWith("</")) {
+      open.push(name);
+      out += tag;
+      continue;
+    }
+
+    const depth = open.lastIndexOf(name);
+    if (depth === -1) continue;
+    for (let d = open.length - 1; d > depth; d--) out += `</${open[d]}>`;
+    out += tag;
+    open.length = depth;
+  }
+
+  while (open.length > 0) out += `</${open.pop()}>`;
+  return out;
+}
+
 function emphasis(t: string): string {
   return t
     .replace(/\*\*\*(\S[\s\S]*?\S|\S)\*\*\*/g, "<strong><em>$1</em></strong>")
@@ -63,6 +260,15 @@ function emphasis(t: string): string {
     .replace(/~~(\S[\s\S]*?\S|\S)~~/g, "<del>$1</del>");
 }
 
+function LINK_RE(bang: string): RegExp {
+  return new RegExp(
+    `${bang}\\[([^\\]]{0,${MAX_LABEL}})\\]` +
+      `\\(\\s*((?:[^()\\s]|\\([^()\\s]*\\)){1,${MAX_URL_PARTS}})` +
+      `(?:\\s+&quot;(.{0,${MAX_LABEL}}?)&quot;)?\\s*\\)`,
+    "g",
+  );
+}
+
 function inline(src: string): string {
   const s: Stash = [];
   let text = escapeHtml(src.replace(/\x00/g, ""));
@@ -71,15 +277,17 @@ function inline(src: string): string {
     park(s, `<code>${code.trim()}</code>`),
   );
 
-  text = text.replace(/&lt;!--[\s\S]*?--&gt;/g, "");
-  text = text.replace(/&lt;br\s*\/?&gt;/gi, () => park(s, "<br>"));
-  text = text.replace(
-    /&lt;\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s(?:(?!&gt;)[\s\S])*?)?\/?&gt;/g,
-    "",
-  );
+  text = text.replace(new RegExp(`&lt;!--[\\s\\S]{0,${MAX_COMMENT}}?--&gt;`, "g"), "");
+  text = text.replace(RAW_TEXT_INLINE, "");
+
+  HTML_TAG.lastIndex = 0;
+  text = text.replace(HTML_TAG, (_m, closing: string, name: string, attrs: string) => {
+    const tag = rebuildTag(closing, name, attrs);
+    return tag ? park(s, tag) : "";
+  });
 
   text = text.replace(
-    /!\[([^\]]*)\]\(\s*((?:[^()\s]|\([^()\s]*\))+)(?:\s+&quot;(.*?)&quot;)?\s*\)/g,
+    LINK_RE("!"),
     (_m, alt: string, url: string, title?: string) => {
       const src = safeUrl(url);
       if (!src) return alt;
@@ -89,7 +297,7 @@ function inline(src: string): string {
   );
 
   text = text.replace(
-    /\[([^\]]*)\]\(\s*((?:[^()\s]|\([^()\s]*\))+)(?:\s+&quot;(.*?)&quot;)?\s*\)/g,
+    LINK_RE(""),
     (_m, label: string, url: string, title?: string) => {
       const inner = emphasis(label);
       const href = safeUrl(url);
@@ -100,7 +308,7 @@ function inline(src: string): string {
   );
 
   text = text.replace(
-    /&lt;((?:https?:\/\/|mailto:)\S+?)&gt;/g,
+    new RegExp(`&lt;((?:https?://|mailto:)\\S{1,${MAX_URL_PARTS}}?)&gt;`, "g"),
     (_m, url: string) => park(s, `<a href="${url}"${linkAttrs(url)}>${url}</a>`),
   );
 
@@ -128,10 +336,8 @@ const FENCE = /^\s{0,3}(`{3,}|~{3,})\s*(\S*).*$/;
 const RULE = /^\s{0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/;
 const QUOTE = /^\s{0,3}>/;
 
-// GitHub alert marker: the whole first line of a blockquote, nothing else.
 const ALERT = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$/i;
 
-// Pixel icon per alert kind (names from the pixelarticons set).
 const ALERT_ICON: Record<string, string> = {
   note: "info-box",
   tip: "lightbulb",
@@ -140,11 +346,11 @@ const ALERT_ICON: Record<string, string> = {
   caution: "square-alert",
 };
 
-function alertBlock(kind: string, body: string[]): string {
+function alertBlock(kind: string, body: string[], depth: number): string {
   const key = kind.toLowerCase();
   const label = key.charAt(0).toUpperCase() + key.slice(1);
   const glyph = icon(ALERT_ICON[key] ?? "info-box");
-  const inner = blocks(body);
+  const inner = blocks(body, depth + 1);
   const title = `<p class="md-alert-title">${glyph}${label}</p>`;
   return `<div class="md-alert md-alert-${key}">\n${title}\n${inner}\n</div>`;
 }
@@ -157,11 +363,19 @@ function indentOf(line: string): number {
   return /^\s*/.exec(line)?.[0].length ?? 0;
 }
 
-const HTML_ONLY = /^(?:<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*)?\/?>\s*)+$/;
+const BLOCK_HTML = new Set([
+  "div", "p", "center", "h1", "h2", "h3", "h4", "h5", "h6",
+  "table", "thead", "tbody", "tfoot", "tr", "th", "td",
+  "ul", "ol", "li", "dl", "dt", "dd",
+  "blockquote", "pre", "details", "summary",
+  "figure", "figcaption", "picture", "source", "hr",
+]);
+
+const BLOCK_HTML_START = /^\s{0,3}<(\/?)([a-zA-Z][a-zA-Z0-9]{0,14})(?=[\s/>])/;
 
 function isHtmlOnly(line: string): boolean {
-  const t = line.trim();
-  return t.startsWith("<") && HTML_ONLY.test(t);
+  const m = BLOCK_HTML_START.exec(line);
+  return m !== null && BLOCK_HTML.has(m[2]!.toLowerCase());
 }
 
 function isBlockStart(line: string): boolean {
@@ -171,6 +385,7 @@ function isBlockStart(line: string): boolean {
     ATX.test(line) ||
     QUOTE.test(line) ||
     LIST_ITEM.test(line) ||
+    RAW_TEXT.test(line) ||
     isHtmlOnly(line) ||
     line.trimStart().startsWith("<!--")
   );
@@ -222,7 +437,7 @@ function table(lines: string[], start: number): [string, number] {
   ];
 }
 
-function list(lines: string[], start: number): [string, number] {
+function list(lines: string[], start: number, depth: number): [string, number] {
   const first = LIST_ITEM.exec(at(lines, start));
   if (!first) return ["", start + 1];
   const bullet = first[2] ?? "-";
@@ -274,7 +489,7 @@ function list(lines: string[], start: number): [string, number] {
       const checkbox = task
         ? `<input type="checkbox" disabled${task[1] === " " ? "" : " checked"}> `
         : "";
-      const rendered = blocks(body).replace(/^<p>([\s\S]*?)<\/p>(?=\n<|$)/, "$1");
+      const rendered = blocks(body, depth + 1).replace(/^<p>([\s\S]*?)<\/p>(?=\n<|$)/, "$1");
       return `<li>${checkbox}${rendered}</li>`;
     })
     .join("\n");
@@ -287,7 +502,12 @@ function list(lines: string[], start: number): [string, number] {
   return [`<${tag}${startAttr}>\n${html}\n</${tag}>`, i];
 }
 
-function blocks(lines: string[]): string {
+function blocks(lines: string[], depth = 0): string {
+  if (depth > MAX_NEST) {
+    const text = lines.filter((l) => l.trim()).join("\n");
+    return text ? `<p>${paragraph(text.split("\n"))}</p>` : "";
+  }
+
   const out: string[] = [];
   let i = 0;
 
@@ -354,11 +574,11 @@ function blocks(lines: string[]): string {
 
       const marker = ALERT.exec(buf[0] ?? "");
       if (marker) {
-        out.push(alertBlock(marker[1] ?? "", buf.slice(1)));
+        out.push(alertBlock(marker[1] ?? "", buf.slice(1), depth));
         continue;
       }
 
-      out.push(`<blockquote>\n${blocks(buf)}\n</blockquote>`);
+      out.push(`<blockquote>\n${blocks(buf, depth + 1)}\n</blockquote>`);
       continue;
     }
 
@@ -370,7 +590,7 @@ function blocks(lines: string[]): string {
     }
 
     if (LIST_ITEM.test(line)) {
-      const [html, next] = list(lines, i);
+      const [html, next] = list(lines, i, depth);
       out.push(html);
       i = next;
       continue;
@@ -387,8 +607,23 @@ function blocks(lines: string[]): string {
       continue;
     }
 
-    if (isHtmlOnly(line)) {
+    const rawText = RAW_TEXT.exec(line);
+    if (rawText && !line.toLowerCase().includes(`</${rawText[1]!.toLowerCase()}`)) {
+      const closer = `</${rawText[1]!.toLowerCase()}`;
       i++;
+      while (i < lines.length && !at(lines, i).toLowerCase().includes(closer)) i++;
+      i++;
+      continue;
+    }
+
+    if (isHtmlOnly(line)) {
+      const buf: string[] = [];
+      while (i < lines.length && at(lines, i).trim()) {
+        buf.push(inline(at(lines, i).trim()));
+        i++;
+      }
+      const html = buf.join("\n");
+      if (html.trim()) out.push(html);
       continue;
     }
 
@@ -408,18 +643,26 @@ function blocks(lines: string[]): string {
 }
 
 export function renderMarkdown(src: string): string {
-  const lines = src
+  const oversize = src.length > MAX_RENDER_CHARS;
+  const lines = (oversize ? src.slice(0, MAX_RENDER_CHARS) : src)
     .replace(/\r\n?/g, "\n")
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
     .split("\n");
-  return blocks(lines);
+
+  if (oversize) lines.pop();
+
+  const html = balanceHtml(blocks(lines));
+  return oversize
+    ? `${html}\n<p><em>This document was truncated for display.</em></p>`
+    : html;
 }
 
 function flatten(s: string): string {
-  const paren = "(?:[^()]|\\([^()]*\\))*";
+  const paren = `(?:[^()]|\\([^()]*\\)){0,${MAX_URL_PARTS}}`;
+  const label = `[^\\]]{0,${MAX_LABEL}}`;
   return s
-    .replace(new RegExp(`!\\[[^\\]]*\\]\\(${paren}\\)`, "g"), " ")
-    .replace(new RegExp(`\\[([^\\]]*)\\]\\(${paren}\\)`, "g"), "$1")
+    .replace(new RegExp(`!\\[${label}\\]\\(${paren}\\)`, "g"), " ")
+    .replace(new RegExp(`\\[(${label})\\]\\(${paren}\\)`, "g"), "$1")
     .replace(/<[^<>]*>/g, " ")
     .replace(/[*_`~]/g, "")
     .replace(/\\([\\`*_{}[\]()#+\-.!])/g, "$1")
@@ -429,9 +672,10 @@ function flatten(s: string): string {
 
 export function plainSummary(src: string, max = 180): string {
   const text = src
+    .slice(0, MAX_RENDER_CHARS)
     .replace(/\r\n?/g, "\n")
     .replace(/```[\s\S]*?(?:```|$)/g, "\n\n")
-    .replace(/<!--[\s\S]*?-->/g, " ");
+    .replace(new RegExp(`<!--[\\s\\S]{0,${MAX_COMMENT}}?-->`, "g"), " ");
 
   for (const block of text.split(/\n\s*\n/)) {
     const lines = block.split("\n").filter((l) => l.trim());
