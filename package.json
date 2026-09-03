@@ -9,12 +9,13 @@
     "start": "node --experimental-sqlite --disable-warning=ExperimentalWarning dist/server.js",
     "dev": "npm run build && npm start",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types test/urls.test.mjs && node --experimental-strip-types test/transport.test.mjs && node --experimental-strip-types test/markdown.test.mjs && node --experimental-sqlite --disable-warning=ExperimentalWarning --experimental-strip-types test/ownership.test.mjs && node --experimental-sqlite --disable-warning=ExperimentalWarning --experimental-strip-types test/access.test.mjs && node --experimental-strip-types test/refs.test.mjs && node --experimental-sqlite --disable-warning=ExperimentalWarning --experimental-strip-types test/lifecycle.test.mjs && node --experimental-sqlite --disable-warning=ExperimentalWarning --experimental-strip-types test/mirror.test.mjs && node --experimental-sqlite --disable-warning=ExperimentalWarning --experimental-strip-types test/notify.test.mjs"
+    "test": "node --experimental-strip-types test/urls.test.mjs && node --experimental-strip-types test/transport.test.mjs && node --experimental-strip-types test/markdown.test.mjs && node --experimental-strip-types test/icons.test.mjs && node --experimental-sqlite --disable-warning=ExperimentalWarning --experimental-strip-types test/ownership.test.mjs && node --experimental-sqlite --disable-warning=ExperimentalWarning --experimental-strip-types test/access.test.mjs && node --experimental-strip-types test/refs.test.mjs && node --experimental-sqlite --disable-warning=ExperimentalWarning --experimental-strip-types test/lifecycle.test.mjs && node --experimental-sqlite --disable-warning=ExperimentalWarning --experimental-strip-types test/mirror.test.mjs && node --experimental-sqlite --disable-warning=ExperimentalWarning --experimental-strip-types test/notify.test.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
     "hono": "^4.13.1",
-    "openid-client": "^6.1.7"
+    "openid-client": "^6.1.7",
+    "pixelarticons": "^2.4.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -22,5 +23,8 @@
     "@vanilla-extract/esbuild-plugin": "^2.3.11",
     "esbuild": "^0.24.2",
     "typescript": "^5.7.2"
+  },
+  "allowScripts": {
+    "esbuild@0.24.2": true
   }
 }
