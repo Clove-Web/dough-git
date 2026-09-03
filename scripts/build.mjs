@@ -19,6 +19,10 @@ await build({
   // Keep runtime deps (hono, openid-client, @hono/node-server) external so they
   // resolve from node_modules at run time; only our own code + .css.ts is bundled.
   packages: "external",
+  // url(/static/...) references in the .css.ts (cursors, etc.) are resolved by
+  // the app's static handler at run time, not on disk at build time — leave them
+  // untouched instead of trying (and failing) to bundle them.
+  external: ["/static/*"],
   outdir: "dist",
   minify: true,
   logLevel: "info",
