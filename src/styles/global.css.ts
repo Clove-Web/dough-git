@@ -30,9 +30,7 @@ globalStyle("a", {
 
 globalStyle("a:hover", { textDecoration: "underline" });
 
-// Pixel cursors, self-hosted from public/cursors/ (served at /static/cursors/).
-// dough-git is always dark, so the dark cursor art is the plain default.
-// The trailing keyword is the fallback if the image is ever missing.
+// Self-hosted pixel cursor (dark art, since dough-git is always dark).
 globalStyle("a, button", {
   cursor: "url('/static/cursors/pointer-dark.png') 12 1, pointer",
 });

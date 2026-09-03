@@ -1,14 +1,9 @@
 /* src/icons.ts */
-//
-// Inline pixel icons, read straight from the installed `pixelarticons` package
-// (MIT, © 2019 Gerrit Halfmann). No icon paths are copied into this repo, so
-// the set always matches the installed version. esbuild keeps the package
-// external (see scripts/build.mjs) and it ships as a runtime dependency, so
-// getIconSvg resolves its svg/ files in dev and in the Docker image alike.
 
+// Icons are read from the installed pixelarticons package (MIT); none copied in.
 import { getIconSvg } from "pixelarticons";
 
-// Parsed icon source, cached per name so each file is read once per process.
+// Parsed icon source, cached so each file is read once per process.
 const cache = new Map<string, { viewBox: string; body: string }>();
 
 function parse(name: string): { viewBox: string; body: string } {
@@ -35,9 +30,7 @@ function parse(name: string): { viewBox: string; body: string } {
   return parsed;
 }
 
-// Render one icon as an inline SVG string. `name` is any pixelarticons name
-// (kebab-case, e.g. "git-branch", "folder", "lock"). Colour follows the
-// parent's `currentColor`; the `.icon` class is styled in app.css.ts.
+// Render one pixelarticons icon (kebab-case name) as an inline SVG string.
 export function icon(name: string, size = 16): string {
   const { viewBox, body } = parse(name);
   return `<svg class="icon" viewBox="${viewBox}" width="${size}" height="${size}" aria-hidden="true">${body}</svg>`;

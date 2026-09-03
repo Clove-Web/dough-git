@@ -79,7 +79,7 @@ check(
 );
 check(
   "note alert includes an inline icon",
-  has("> [!NOTE]\n> Heads up.", 'class="md-alert-icon"'),
+  has("> [!NOTE]\n> Heads up.", 'class="icon"'),
 );
 check(
   "tip alert",

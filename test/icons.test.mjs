@@ -1,10 +1,6 @@
-// Tests for the inline icon helper.
-//
-// icon() reads from the installed pixelarticons package at call time, so these
-// checks pin the contract views.ts relies on: a real icon name yields one
-// <svg> that inherits colour and stays crisp, the size argument is honoured,
-// and an unknown name fails loudly rather than rendering nothing.
-//
+/* test/icons.test.mjs */
+
+// Pins the contract views.ts relies on from icon().
 // Run:  node --experimental-strip-types test/icons.test.mjs
 
 import { icon } from "../src/icons.ts";
