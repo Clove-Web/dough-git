@@ -80,6 +80,10 @@ console.log("\n-- port / query / fragment --");
 no("github", "https://github.com:8080/user/repo", "explicit port");
 no("github", "https://github.com:22/user/repo", "explicit ssh port");
 no("github", "https://github.com/user/repo?x=1", "query string");
+// The webhook validator opts into thread_id and wait; mirrors opt into
+// nothing, so those names must be just as dead here as any other.
+no("github", "https://github.com/user/repo?thread_id=17", "an opted-in webhook parameter");
+no("github", "https://github.com/user/repo?wait=true", "a webhook boolean");
 no("github", "https://github.com/user/repo#frag", "fragment");
 
 console.log("\n-- path shape --");
@@ -124,12 +128,44 @@ check(
   "accepts canary",
   discordWebhookUrl("https://canary.discord.com/api/webhooks/1/tok") !== null,
 );
+check(
+  "accepts ptb",
+  discordWebhookUrl("https://ptb.discord.com/api/webhooks/1/tok") !== null,
+);
+
+// thread_id and wait are the only query parameters allowed through, and only
+// with these exact value shapes. Anything else must still be refused outright.
+check("accepts thread_id", discordWebhookUrl(`${W}?thread_id=17`) === `${W}?thread_id=17`);
+check("accepts wait=true", discordWebhookUrl(`${W}?wait=true`) === `${W}?wait=true`);
+check("accepts wait=false", discordWebhookUrl(`${W}?wait=false`) === `${W}?wait=false`);
+check(
+  "accepts both together",
+  discordWebhookUrl(`${W}?thread_id=17&wait=true`) === `${W}?thread_id=17&wait=true`,
+);
+check(
+  "canonicalises parameter order",
+  discordWebhookUrl(`${W}?wait=true&thread_id=17`) === `${W}?thread_id=17&wait=true`,
+);
+check(
+  "keeps parameters on canary",
+  discordWebhookUrl("https://canary.discord.com/api/webhooks/1/tok?thread_id=17") ===
+    "https://canary.discord.com/api/webhooks/1/tok?thread_id=17",
+);
+
 const wno = (url, why) =>
   check(`refuses webhook ${why}`, discordWebhookUrl(url) === null);
 wno("https://evil.test/api/webhooks/1/tok", "wrong host");
 wno("https://discord.com.evil.test/api/webhooks/1/tok", "suffixed host");
 wno("http://discord.com/api/webhooks/1/tok", "plain http");
-wno("https://discord.com/api/webhooks/1/tok?wait=true", "query string");
+wno(`${W}?username=admin`, "an unlisted parameter");
+wno(`${W}?thread_id=17&evil=1`, "an unlisted parameter alongside a good one");
+wno(`${W}?thread_id=abc`, "non-numeric thread_id");
+wno(`${W}?thread_id=`, "empty thread_id");
+wno(`${W}?thread_id=${"9".repeat(33)}`, "over-long thread_id");
+wno(`${W}?thread_id=17&thread_id=18`, "a repeated parameter");
+wno(`${W}?wait=1`, "wait that is not a boolean");
+wno(`${W}?wait=TRUE`, "wait in the wrong case");
+wno(`${W}#fragment`, "a fragment");
 wno("https://discord.com/", "no webhook path");
 wno("https://discord.com/api/webhooks/", "incomplete path");
 wno("https://discord.com/api/webhooks/notanid/tok", "non-numeric id");

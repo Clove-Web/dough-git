@@ -24,7 +24,16 @@ const MAX_URL = 400;
 
 const HOSTILE = /[\s\\<>"'`{}|^\x00-\x1f\x7f]/;
 
-function parseStrict(raw: string, allowedHosts: readonly string[]): URL | null {
+// allowedParams names the query parameters a caller is willing to consider.
+// It is deliberately opt-in and empty by default, so every existing caller
+// keeps the blanket "no query string" rule. Naming a parameter here only gets
+// it past this gate — the caller still has to validate the value and rebuild
+// the query itself, so nothing user-controlled is passed through verbatim.
+function parseStrict(
+  raw: string,
+  allowedHosts: readonly string[],
+  allowedParams: readonly string[] = [],
+): URL | null {
   const value = raw.trim();
   if (!value || value.length > MAX_URL) return null;
   if (HOSTILE.test(value)) return null;
@@ -41,8 +50,20 @@ function parseStrict(raw: string, allowedHosts: readonly string[]): URL | null {
   if (url.protocol !== "https:") return null;
   if (url.username || url.password) return null;
   if (url.port) return null;
-  if (url.search || url.hash) return null;
+  if (url.hash) return null;
   if (!allowedHosts.includes(url.hostname)) return null;
+
+  if (url.search) {
+    const seen = new Set<string>();
+    for (const key of url.searchParams.keys()) {
+      if (!allowedParams.includes(key)) return null;
+      // A repeated key is ambiguous rather than useful; refuse instead of
+      // silently picking one of the values.
+      if (seen.has(key)) return null;
+      seen.add(key);
+    }
+  }
+
   return url;
 }
 
@@ -91,11 +112,37 @@ const DISCORD_HOSTS = [
 
 const WEBHOOK_PATH = /^\/api(?:\/v\d{1,3})?\/webhooks\/\d{1,32}\/[A-Za-z0-9._-]{1,200}$/;
 
+// The two Discord webhook parameters worth honouring, each pinned to the exact
+// shape its value may take. thread_id posts into an existing thread rather than
+// the parent channel; wait=true makes Discord answer 200 + the created message
+// instead of a bare 204, so a delivery that Discord rejects is reported as a
+// failure rather than passing silently. Both stay inside notify.ts's
+// `response.ok` check, which spans the whole 2xx range.
+const WEBHOOK_PARAMS: Record<string, RegExp> = {
+  thread_id: /^\d{1,32}$/,
+  wait: /^(?:true|false)$/,
+};
+
+const WEBHOOK_PARAM_NAMES = Object.keys(WEBHOOK_PARAMS);
+
 export function discordWebhookUrl(raw: string): string | null {
-  const url = parseStrict(raw, DISCORD_HOSTS);
+  const url = parseStrict(raw, DISCORD_HOSTS, WEBHOOK_PARAM_NAMES);
   if (!url) return null;
   if (!WEBHOOK_PATH.test(url.pathname)) return null;
-  return `https://${url.hostname}${url.pathname}`;
+
+  // Rebuild the query from validated values in a fixed order rather than
+  // reusing url.search, so the stored URL is canonical and nothing the user
+  // typed reaches fetch() unexamined.
+  const params = new URLSearchParams();
+  for (const name of WEBHOOK_PARAM_NAMES) {
+    const value = url.searchParams.get(name);
+    if (value === null) continue;
+    if (!WEBHOOK_PARAMS[name]!.test(value)) return null;
+    params.set(name, value);
+  }
+
+  const query = params.toString();
+  return `https://${url.hostname}${url.pathname}${query ? `?${query}` : ""}`;
 }
 
 export function maskWebhook(url: string): string {
