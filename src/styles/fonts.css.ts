@@ -15,6 +15,20 @@ const COMIC_CODE = [
   { file: "ComicCode-Bold", weight: 700, style: "normal" },
 ] as const;
 
+const MAPLE_MONO = [
+  { file: "MapleMono-Regular", weight: 400 },
+  { file: "MapleMono-Bold", weight: 700 },
+] as const;
+
+for (const { file, weight } of MAPLE_MONO) {
+  globalFontFace("Maple Mono", {
+    src: `url('${CDN}/Maple-Mono/Normal/woff2/${file}.woff2') format('woff2')`,
+    fontWeight: weight,
+    fontStyle: "normal",
+    fontDisplay: "swap",
+  });
+}
+
 globalFontFace("Ink Free", {
   src: `url('${CDN}/Ink-Free/Inkfree.woff2') format('woff2')`,
   fontWeight: 400,
