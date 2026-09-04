@@ -11,6 +11,7 @@ import {
 export const vars = createGlobalThemeContract({
   accent: "accent",
   accentAlt: "accent-alt",
+  gilt: "gilt",
   danger: "danger",
   success: "success",
 
@@ -34,23 +35,24 @@ export const vars = createGlobalThemeContract({
 });
 
 createGlobalTheme(":root", vars, {
-  accent: "#f5a9b8",
-  accentAlt: "#d15f8c",
-  danger: "#d15f8c",
-  success: "#f5a9b8",
+  accent: "#5cd1e6",
+  accentAlt: "#34a9c6",
+  gilt: "#d8b775",
+  danger: "#ec6a80",
+  success: "#4fc9a4",
 
-  bgDeep: "#05060a",
-  bgRaised: "#0e1017",
-  bg: "#0a0b10",
-  surface: "#12141c",
-  surfaceHi: "#1b1e2a",
-  border: "#232838",
+  bgDeep: "#02060c",
+  bgRaised: "#0b1726",
+  bg: "#060d18",
+  surface: "#112035",
+  surfaceHi: "#1c2f48",
+  border: "#294464",
 
-  textFaint: "#5b6480",
-  textDim: "#6b7391",
-  textMuted: "#9aa3c2",
-  textSoft: "#c9cfe0",
-  text: "#f4f6fb",
+  textFaint: "#64809c",
+  textDim: "#7a95b0",
+  textMuted: "#93aec7",
+  textSoft: "#c2d6e6",
+  text: "#eaf4fb",
 
   font: "'Comic Code', system-ui, -apple-system, sans-serif",
   display: "'Ink Free', 'Comic Code', system-ui, -apple-system, sans-serif",

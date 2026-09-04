@@ -362,5 +362,59 @@ check("closers cannot outnumber openers", has("<div>a</div></div></div>", "<div>
 check("the internal tag markers never reach output", lacks("<div>x</div>", "\u0001") && lacks("<div>x</div>", "\u0002"));
 check("a forged marker in source is inert", lacks("\u0001<script>alert(1)</script>\u0002", "<script"));
 
+console.log("\n-- seven elemental alerts --");
+
+for (const [kind, label] of [
+  ["NOTE", "Note"], ["TIP", "Tip"], ["IMPORTANT", "Important"],
+  ["WARNING", "Warning"], ["CAUTION", "Caution"],
+  ["FROZEN", "Frozen"], ["ASIDE", "Aside"],
+]) {
+  const md = `> [!${kind}]\n> body`;
+  check(`${kind} renders`, has(md, `md-alert-${kind.toLowerCase()}`) && has(md, `${label}</p>`));
+}
+check("alert kinds are case-insensitive", has("> [!frozen]\n> b", "md-alert-frozen"));
+check("an unknown alert stays a blockquote", has("> [!SPARKLE]\n> b", "<blockquote>"));
+check("alert body still renders markdown", has("> [!ASIDE]\n> **b**", "<strong>b</strong>"));
+
+console.log("\n-- pride text --");
+
+for (const flag of [
+  "gay", "lesbian", "bisexual", "transgender", "pansexual",
+  "asexual", "aromantic", "nonbinary", "queer",
+]) {
+  check(`pride="${flag}"`, has(`<p pride="${flag}">x</p>`, `<p class="md-pride md-pride-${flag}">x</p>`));
+}
+for (const [alias, real] of [
+  ["trans", "transgender"], ["bi", "bisexual"], ["pan", "pansexual"],
+  ["ace", "asexual"], ["aro", "aromantic"], ["enby", "nonbinary"],
+  ["nb", "nonbinary"], ["mlm", "gay"], ["wlw", "lesbian"],
+]) {
+  check(`alias "${alias}" resolves to ${real}`, has(`<p pride="${alias}">x</p>`, `md-pride-${real}`));
+}
+check("pride works on span, inline", has('a <span pride="queer">b</span> c', '<span class="md-pride md-pride-queer">b</span>'));
+check("markdown still renders inside", has('<p pride="gay">**b** and `c`</p>', "<strong>b</strong>"));
+check("code inside keeps its own colour hook", has('<p pride="gay">`c`</p>', "<code>c</code>"));
+check("styling stops at the closing tag", has('<p pride="gay">a</p>\n\nplain', "<p>plain</p>"));
+check("a neighbouring paragraph is untouched", lacks('<p pride="gay">a</p>\n\nplain', '<p class="md-pride md-pride-gay">plain'));
+
+console.log("\n-- pride fails closed --");
+
+check("an unknown flag renders a plain paragraph", has('<p pride="wibble">x</p>', "<p>x</p>"));
+check("an empty value renders plain", has('<p pride="">x</p>', "<p>x</p>"));
+check("two flags in one value render plain", has('<p pride="gay lesbian">x</p>', "<p>x</p>"));
+check("css cannot ride the attribute", lacks('<p pride="gay;background:url(javascript:1)">x</p>', "background"));
+check("markup cannot ride the attribute", lacks('<p pride="gay&quot;&gt;&lt;script&gt;">x</p>', "<script"));
+check("path characters are refused", has('<p pride="../../etc">x</p>', "<p>x</p>"));
+check("pride is not allowed on div", lacks('<div pride="gay">x</div>', "md-pride"));
+check("pride is not allowed on img", lacks('<img src="a.png" pride="gay">', "md-pride"));
+check(
+  "class cannot be set directly, so pride is the only route",
+  lacks('<p class="md-pride md-pride-gay">x</p>', "md-pride"),
+);
+check("a repeated pride attribute yields one class", (() => {
+  const out = renderMarkdown('<p pride="gay" pride="queer">x</p>');
+  return (out.match(/md-pride-/g) ?? []).length === 1;
+})());
+
 console.log(failures === 0 ? "\nALL PASSED" : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

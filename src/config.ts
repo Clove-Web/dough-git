@@ -27,7 +27,7 @@ export const config = {
     "A minimal self-hosted git mirror.",
   ),
 
-  themeColor: optional("MINIGIT_THEME_COLOR", "#0a0b10"),
+  themeColor: optional("MINIGIT_THEME_COLOR", "#060d18"),
 
   publicMarker: optional("MINIGIT_PUBLIC_MARKER", "minigit-public"),
 

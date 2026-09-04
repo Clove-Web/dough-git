@@ -132,6 +132,7 @@ export const classes = {
 
   profileName: style({
     fontFamily: vars.display,
+    color: vars.gilt,
     fontSize: "1.6rem",
     letterSpacing: "0.01em",
     margin: 0,
@@ -152,6 +153,7 @@ export const classes = {
 
   repoTitle: style({
     fontFamily: vars.display,
+    color: vars.gilt,
     fontSize: "1.55rem",
     fontWeight: 500,
     letterSpacing: "0.01em",
@@ -170,6 +172,7 @@ export const classes = {
 
   repoName: style({
     fontFamily: vars.display,
+    color: vars.gilt,
     fontSize: "1.05em",
     fontWeight: 500,
   }),
@@ -409,11 +412,25 @@ globalStyle(`${readme} blockquote`, {
 });
 
 const alertColor = {
-  note: "#4493f8",
-  tip: "#3fb950",
-  important: "#ab7df8",
-  warning: "#d29922",
-  caution: "#f85149",
+  note: "#47b6ee",
+  tip: "#96d94f",
+  important: "#b58fe0",
+  warning: "#f2b23c",
+  caution: "#ef6144",
+  frozen: "#b8dfe8",
+  aside: "#74c2a8",
+};
+
+const prideFlag: Record<string, string[]> = {
+  gay: ["#13a888", "#26ceaa", "#98e8c1", "#7bade2", "#918cdf"],
+  lesbian: ["#ec7151", "#e8782e", "#ee9d67", "#f2f7fb", "#d675af", "#ee63b5"],
+  bisexual: ["#ee64ab", "#bf80ba", "#6894ee"],
+  transgender: ["#67c9ee", "#f5a9b8", "#f2f7fb", "#f5a9b8", "#67c9ee"],
+  pansexual: ["#ee65a7", "#e6c619", "#37aae9"],
+  asexual: ["#8fa4bc", "#c3d3e2", "#f2f7fb", "#ec54ec"],
+  aromantic: ["#3fab44", "#a7d379", "#f2f7fb", "#c3d3e2", "#8fa4bc"],
+  nonbinary: ["#eae446", "#f2f7fb", "#b480dc", "#8fa4bc"],
+  queer: ["#ef6d6d", "#e68a19", "#e6d719", "#13ac41", "#7994dd", "#c578d5"],
 };
 
 globalStyle(`${readme} .md-alert`, {
@@ -443,6 +460,55 @@ for (const [kind, color] of Object.entries(alertColor)) {
 
   globalStyle(`${readme} .md-alert-${kind} .md-alert-title`, {
     color,
+  });
+}
+
+globalStyle(`${readme} .md-alert-frozen`, {
+  background: "rgba(184, 223, 232, 0.05)",
+});
+
+globalStyle(`${readme} .md-alert-aside`, {
+  borderLeftWidth: "2px",
+  color: vars.textMuted,
+});
+
+globalStyle(`${readme} .md-alert-aside .md-alert-title`, {
+  fontWeight: 400,
+});
+
+globalStyle(`${readme} .md-pride`, {
+  fontWeight: 600,
+  color: vars.text,
+  "@supports": {
+    "(-webkit-background-clip: text) or (background-clip: text)": {
+      WebkitBackgroundClip: "text",
+      backgroundClip: "text",
+      color: "transparent",
+      backgroundSize: "100% 100%",
+    },
+  },
+  "@media": {
+    "(prefers-contrast: more)": {
+      backgroundImage: "none",
+      color: vars.text,
+      WebkitTextFillColor: vars.text,
+    },
+  },
+});
+
+globalStyle(`${readme} .md-pride a`, {
+  color: "inherit",
+  textDecoration: "underline",
+});
+
+globalStyle(`${readme} .md-pride code`, {
+  WebkitTextFillColor: vars.textSoft,
+  color: vars.textSoft,
+});
+
+for (const [flag, stops] of Object.entries(prideFlag)) {
+  globalStyle(`${readme} .md-pride-${flag}`, {
+    backgroundImage: `linear-gradient(96deg, ${stops.join(", ")})`,
   });
 }
 

@@ -56,8 +56,8 @@ const HTML_ATTRS: Record<string, readonly string[]> = {
   picture: [],
   source: ["src", "srcset", "media", "type"],
   div: ["align"],
-  p: ["align"],
-  span: [],
+  p: ["align", "pride"],
+  span: ["pride"],
   center: [],
   h1: ["align"],
   h2: ["align"],
@@ -111,6 +111,36 @@ const RAW_TEXT_INLINE = new RegExp(
     `(?:(?!&lt;/)[\\s\\S]){0,${MAX_RENDER_CHARS}}?&lt;/\\1\\s*&gt;`,
   "gi",
 );
+
+const PRIDE_FLAGS = new Set([
+  "gay",
+  "lesbian",
+  "bisexual",
+  "transgender",
+  "pansexual",
+  "asexual",
+  "aromantic",
+  "nonbinary",
+  "queer",
+]);
+
+const PRIDE_ALIAS: Record<string, string> = {
+  trans: "transgender",
+  bi: "bisexual",
+  pan: "pansexual",
+  ace: "asexual",
+  aro: "aromantic",
+  enby: "nonbinary",
+  nb: "nonbinary",
+  mlm: "gay",
+  wlw: "lesbian",
+};
+
+function prideFlag(raw: string): string | null {
+  const key = raw.trim().toLowerCase();
+  const named = PRIDE_ALIAS[key] ?? key;
+  return PRIDE_FLAGS.has(named) ? named : null;
+}
 
 const ALIGN_VALUE = /^(?:left|center|right|justify)$/i;
 const DIMENSION_VALUE = /^\d{1,4}(?:%|px)?$/i;
@@ -171,6 +201,8 @@ function attrValue(name: string, raw: string | undefined): string | null {
     case "alt":
     case "title":
       return raw ?? "";
+    case "pride":
+      return raw === undefined ? null : prideFlag(raw);
     case "open":
       return "";
     default:
@@ -186,6 +218,7 @@ function rebuildTag(closing: string, rawName: string, rawAttrs: string): string 
 
   let out = `<${name}`;
   let href = "";
+  const seen = new Set<string>();
   HTML_ATTR.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = HTML_ATTR.exec(rawAttrs)) !== null) {
@@ -194,11 +227,13 @@ function rebuildTag(closing: string, rawName: string, rawAttrs: string): string 
       continue;
     }
     const attr = m[1]!.toLowerCase();
-    if (!allowed.includes(attr)) continue;
+    if (!allowed.includes(attr) || seen.has(attr)) continue;
     const value = attrValue(attr, m[2] ?? m[3] ?? m[4]);
     if (value === null) continue;
+    seen.add(attr);
     if (attr === "href") href = value;
-    out += attr === "open" ? " open" : ` ${attr}="${value}"`;
+    if (attr === "pride") out += ` class="md-pride md-pride-${value}"`;
+    else out += attr === "open" ? " open" : ` ${attr}="${value}"`;
   }
 
   if (name === "a" && href) out += linkAttrs(href);
@@ -336,7 +371,7 @@ const FENCE = /^\s{0,3}(`{3,}|~{3,})\s*(\S*).*$/;
 const RULE = /^\s{0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/;
 const QUOTE = /^\s{0,3}>/;
 
-const ALERT = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$/i;
+const ALERT = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION|FROZEN|ASIDE)\]\s*$/i;
 
 const ALERT_ICON: Record<string, string> = {
   note: "info-box",
@@ -344,6 +379,8 @@ const ALERT_ICON: Record<string, string> = {
   important: "flag",
   warning: "warning-diamond",
   caution: "square-alert",
+  frozen: "snowflake",
+  aside: "wind",
 };
 
 function alertBlock(kind: string, body: string[], depth: number): string {
