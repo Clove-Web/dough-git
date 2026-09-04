@@ -28,6 +28,7 @@ export const vars = createGlobalThemeContract({
   text: "text",
 
   font: "font",
+  display: "display",
   mono: "mono",
   radius: "radius",
 });
@@ -52,6 +53,7 @@ createGlobalTheme(":root", vars, {
   text: "#f4f6fb",
 
   font: "'Comic Code', system-ui, -apple-system, sans-serif",
+  display: "'Ink Free', 'Comic Code', system-ui, -apple-system, sans-serif",
   mono: "ui-monospace, SFMono-Regular, Menlo, monospace",
   radius: "0",
 });

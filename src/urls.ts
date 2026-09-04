@@ -58,24 +58,41 @@ export function mirrorHost(kind: MirrorKind): string {
   return MIRROR_HOSTS[kind];
 }
 
-const PATH_SEGMENT = /^[A-Za-z0-9._-]+$/;
+const PATH_SEGMENT = /^[A-Za-z0-9._-]{1,100}$/;
 
 function safePathSegment(s: string): boolean {
-  return PATH_SEGMENT.test(s) && !s.startsWith(".") && !s.includes("..");
+  if (!PATH_SEGMENT.test(s) || s.startsWith("-")) return false;
+  return s !== "." && s !== ".." && !s.includes("..");
 }
 
-export function mirrorUrl(kind: MirrorKind, raw: string): string | null {
-  const url = parseStrict(raw, [MIRROR_HOSTS[kind]]);
-  if (!url) return null;
+export function mirrorPath(kind: MirrorKind, raw: string): string | null {
+  const value = raw.trim();
+  if (!value || value.length > MAX_URL) return null;
+  if (HOSTILE.test(value)) return null;
 
-  const parts = url.pathname.split("/").filter((p) => p.length > 0);
+  const prefix = `https://${MIRROR_HOSTS[kind]}/`;
+  const bare = (
+    value.toLowerCase().startsWith(prefix) ? value.slice(prefix.length) : value
+  ).replace(/\/+$/, "");
+
+  const parts = bare.split("/");
   if (parts.length !== 2) return null;
 
   const owner = parts[0]!;
   const repo = parts[1]!.replace(/\.git$/, "");
   if (!safePathSegment(owner) || !safePathSegment(repo)) return null;
 
-  return `https://${url.hostname}/${owner}/${repo}`;
+  return `${owner}/${repo}`;
+}
+
+export function mirrorUrl(kind: MirrorKind, raw: string): string | null {
+  const path = mirrorPath(kind, raw);
+  return path === null ? null : `https://${MIRROR_HOSTS[kind]}/${path}`;
+}
+
+export function mirrorSlug(kind: MirrorKind, url: string): string {
+  const prefix = `https://${MIRROR_HOSTS[kind]}/`;
+  return url.startsWith(prefix) ? url.slice(prefix.length) : url;
 }
 
 const DISCORD_HOSTS = [

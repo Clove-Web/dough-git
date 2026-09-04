@@ -131,7 +131,9 @@ export const classes = {
   }),
 
   profileName: style({
-    fontSize: "1.4rem",
+    fontFamily: vars.display,
+    fontSize: "1.6rem",
+    letterSpacing: "0.01em",
     margin: 0,
   }),
 
@@ -340,8 +342,10 @@ globalStyle(`${readme} > :last-child`, { marginBottom: 0 });
 globalStyle(
   `${readme} h1, ${readme} h2, ${readme} h3, ${readme} h4, ${readme} h5, ${readme} h6`,
   {
+    fontFamily: vars.display,
     fontWeight: 600,
     lineHeight: 1.25,
+    letterSpacing: "0.01em",
     margin: "1.5rem 0 0.75rem",
   },
 );

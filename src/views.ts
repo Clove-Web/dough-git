@@ -7,7 +7,7 @@ import { classes as c } from "./styles/index.ts";
 import { icon } from "./icons.ts";
 import { escapeHtml, renderMarkdown, plainSummary } from "./markdown.ts";
 import { sessionSlug } from "./auth.ts";
-import { maskWebhook, mirrorHost, MIRROR_KINDS, type MirrorKind } from "./urls.ts";
+import { maskWebhook, mirrorHost, mirrorSlug, MIRROR_KINDS, type MirrorKind } from "./urls.ts";
 import type { SessionUser } from "./auth.ts";
 import type { CollaboratorRow } from "./access.ts";
 import type { TokenRow } from "./tokens.ts";
@@ -497,7 +497,7 @@ function mirrorSection(
       const status = statuses.get(link.kind) ?? null;
       const view = describeMirror(link, status, nowSec);
       return `      <div class="${c.mirrorRow}">
-        <span class="${c.mirrorKind}"><a class="${c.withIcon}" href="${esc(link.url)}" rel="nofollow noopener noreferrer">${icon(link.kind === "github" ? "github" : "git-branch")}${esc(link.kind)}</a></span>
+        <span class="${c.mirrorKind}"><a class="${c.withIcon}" href="${esc(link.url)}" rel="nofollow noopener noreferrer" title="${esc(link.kind)}">${icon(link.kind === "github" ? "github" : "git-branch")}${esc(mirrorSlug(link.kind, link.url))}</a></span>
         <span class="${view.cls} ${c.withIcon}">${icon(view.glyph)}${esc(view.label)}</span>
         <span class="${c.commitHash}">${esc(view.sha)}</span>
         <span class="${c.repoDesc}">${esc(view.detail)}</span>
@@ -534,8 +534,9 @@ ${checkButton}
     const existing = links.find((l) => l.kind === kind);
     return `      <div class="${c.formRow}">
         <label class="${c.cloneLabel} ${c.withIcon}" for="mirror-${kind}">${icon(kind === "github" ? "github" : "git-branch")}${kind}</label>
-        <input id="mirror-${kind}" class="${c.grow}" type="url" name="${kind}"
-          value="${esc(existing?.url ?? "")}" placeholder="https://${esc(mirrorHost(kind))}/user/repo">
+        <input id="mirror-${kind}" class="${c.grow}" type="text" name="${kind}"
+          value="${esc(existing ? mirrorSlug(kind, existing.url) : "")}"
+          placeholder="user/repo" pattern="[^\\s/]+/[^\\s/]+/?" autocapitalize="off" spellcheck="false">
         <label><input type="checkbox" name="${kind}_private"${existing?.isPrivate ? " checked" : ""}> private</label>
       </div>`;
   };
@@ -543,7 +544,7 @@ ${checkButton}
   const form = isOwner
     ? `    <form method="post" action="${base(owner, name)}/mirrors" class="${c.cloneBox}">
 ${MIRROR_KINDS.map(field).join("\n")}
-      <p class="${c.repoDesc}">Only ${esc(MIRROR_KINDS.map(mirrorHost).join(" and "))} are accepted.
+      <p class="${c.repoDesc}">Give the <code>user/repo</code> on ${esc(MIRROR_KINDS.map(mirrorHost).join(" or "))} &mdash; not a full URL.
       Mark a mirror <em>private</em> to skip status checks — they are anonymous, so a private
       mirror would otherwise always look unreachable. Clear a field to remove it.</p>
       <button type="submit">${icon("save")}save mirrors</button>

@@ -975,9 +975,9 @@ app.post("/:owner/:name/mirrors", async (c) => {
       view.messagePage({
         title: "that isn't a mirror URL",
         message:
-          `The ${rejected.join(" and ")} link was refused. A mirror must be an ` +
-          `https URL of the form https://${mirrorHost(rejected[0] as MirrorKind)}/owner/repo ` +
-          `— no other host, no credentials, no port.`,
+          `The ${rejected.join(" and ")} link was refused. Give the repository as ` +
+          `owner/repo — for example doughmination/dough-git — and it is looked up on ` +
+          `${mirrorHost(rejected[0] as MirrorKind)}.`,
         user: c.get("user"),
       }),
       400,

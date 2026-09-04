@@ -15,9 +15,16 @@ const COMIC_CODE = [
   { file: "ComicCode-Bold", weight: 700, style: "normal" },
 ] as const;
 
+globalFontFace("Ink Free", {
+  src: `url('${CDN}/Ink-Free/Inkfree.woff2') format('woff2')`,
+  fontWeight: 400,
+  fontStyle: "normal",
+  fontDisplay: "swap",
+});
+
 for (const { file, weight, style } of COMIC_CODE) {
   globalFontFace("Comic Code", {
-    src: `url('${CDN}/Comic-Code/woff2/${file}.woff2') format('woff2'), url('${CDN}/Comic-Code/woff/${file}.woff') format('woff')`,
+    src: `url('${CDN}/Comic-Code/woff2/${file}.woff2') format('woff2')`,
     fontWeight: weight,
     fontStyle: style,
     fontDisplay: "swap",

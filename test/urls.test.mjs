@@ -4,6 +4,8 @@
 
 import {
   mirrorUrl,
+  mirrorPath,
+  mirrorSlug,
   discordWebhookUrl,
   maskWebhook,
   isMirrorKind,
@@ -26,6 +28,43 @@ check("github is a kind", isMirrorKind("github"));
 check("codeberg is a kind", isMirrorKind("codeberg"));
 check("gitlab is not", !isMirrorKind("gitlab"));
 check("only two kinds exist", MIRROR_KINDS.length === 2);
+
+console.log("\n-- mirrors are given as user/repo --");
+ok("github", "user/repo", "https://github.com/user/repo");
+ok("codeberg", "user/repo", "https://codeberg.org/user/repo");
+ok("github", "Clove-Web/dough-git", "https://github.com/Clove-Web/dough-git");
+ok("github", "user/repo.git", "https://github.com/user/repo");
+ok("github", "  user/repo  ", "https://github.com/user/repo");
+ok("github", "user/repo/", "https://github.com/user/repo");
+ok("codeberg", "My-User/my.repo_1", "https://codeberg.org/My-User/my.repo_1");
+
+check("the path form is normalised", mirrorPath("github", " user/repo.git ") === "user/repo");
+check("a slug round-trips for display", mirrorSlug("github", mirrorUrl("github", "a/b")) === "a/b");
+check("a foreign url is left alone by the slug", mirrorSlug("github", "https://x.test/a/b") === "https://x.test/a/b");
+
+console.log("\n-- profile repositories may start with a dot --");
+ok("codeberg", "Clove-Web/.profile", "https://codeberg.org/Clove-Web/.profile");
+ok("github", "Clove-Web/.github", "https://github.com/Clove-Web/.github");
+ok("github", ".owner/.repo", "https://github.com/.owner/.repo");
+no("github", "user/.", "a bare dot repo");
+no("github", "user/..", "a bare double dot repo");
+no("github", "user/..hidden", "a double dot inside a name");
+no("github", "../repo", "traversal in the owner");
+
+console.log("\n-- user/repo is two segments, nothing else --");
+no("github", "repo", "one segment");
+no("github", "a/b/c", "three segments");
+no("github", "/user/repo", "a leading slash");
+no("github", "github.com/user/repo", "a host without a scheme");
+no("github", "http://github.com/user/repo", "a plain-http url");
+no("github", "https://github.com//user/repo", "a doubled slash");
+no("github", "-u/repo", "a leading dash owner");
+no("github", "user/-o", "a leading dash repo");
+no("github", "user/re po", "an inner space");
+no("github", "user/repo?x=1", "a query string");
+no("github", "user/repo#f", "a fragment");
+no("github", "user@host/repo", "an at sign");
+no("github", `${"a".repeat(101)}/repo`, "an over-long owner");
 
 console.log("\n-- valid mirror URLs --");
 ok("github", "https://github.com/user/repo", "https://github.com/user/repo");
@@ -86,7 +125,7 @@ no("github", "https://github.com/user/repo/../../admin", "traversal in path");
 no("github", "https://github.com/../etc/passwd", "traversal as owner");
 no("github", "https://github.com/./repo", "dot segment");
 no("github", "https://github.com/user/..", "dotdot repo");
-no("github", "https://github.com/user/.hidden", "leading-dot repo");
+ok("github", "https://github.com/user/.hidden", "https://github.com/user/.hidden");
 no("github", "https://github.com/us er/repo", "whitespace in path");
 no("github", "https://github.com/user/re%2Fpo", "encoded slash");
 
