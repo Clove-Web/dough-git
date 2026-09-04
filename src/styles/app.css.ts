@@ -150,6 +150,14 @@ export const classes = {
     margin: "0.25rem 0 1rem",
   }),
 
+  repoTitle: style({
+    fontFamily: vars.display,
+    fontSize: "1.55rem",
+    fontWeight: 500,
+    letterSpacing: "0.01em",
+    margin: "0.25rem 0 1rem",
+  }),
+
   sectionTitle: style({
     fontSize: "1.05rem",
     margin: "1.5rem 0 0.5rem",
@@ -160,7 +168,11 @@ export const classes = {
 
   repoRow: style({}),
 
-  repoName: style({ fontWeight: 600 }),
+  repoName: style({
+    fontFamily: vars.display,
+    fontSize: "1.05em",
+    fontWeight: 500,
+  }),
 
   repoDesc: style({ color: vars.textMuted }),
 

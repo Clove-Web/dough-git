@@ -448,7 +448,7 @@ ${collaboratorSection(opts.owner, opts.name, opts.collaborators ?? [])}`
       ? `    <p class="${c.repoDesc}">${esc(opts.rawDescription)}</p>`
       : "";
 
-  const body = `    <h1 class="${c.pageTitle}"><a class="${c.ownerLink}" href="/${esc(opts.owner)}">${esc(opts.owner)}</a>/${esc(opts.name)}</h1>
+  const body = `    <h1 class="${c.repoTitle}"><a class="${c.ownerLink}" href="/${esc(opts.owner)}">${esc(opts.owner)}</a>/${esc(opts.name)}</h1>
     <p class="${c.repoDesc}"><span class="${c.withIcon}">${icon(opts.isPublic ? "unlock" : "lock", 13)}${opts.isPublic ? "public" : "private"}</span>${opts.canPush && !isOwner ? `<span class="${c.badge}">${icon("upload", 11)}you can push</span>` : ""}</p>
 ${repoNav(opts.owner, opts.name, "summary", q)}
 ${descriptionForm}
@@ -713,7 +713,7 @@ export function logPage(opts: {
 }): string {
   const title = `${opts.owner}/${opts.name}`;
   const q = revQuery(opts.rev, opts.refs.head);
-  const body = `    <h1 class="${c.pageTitle}">${esc(title)} &middot; log</h1>
+  const body = `    <h1 class="${c.repoTitle}">${esc(title)} &middot; log</h1>
 ${repoNav(opts.owner, opts.name, "log", q)}
     ${revPicker(opts.refs, opts.rev)}
     ${commitTable(opts.owner, opts.name, opts.commits, q)}`;
@@ -762,7 +762,7 @@ export function treePage(opts: {
     })
     .join("\n");
 
-  const body = `    <h1 class="${c.pageTitle}">${esc(opts.owner)}/${esc(opts.name)} &middot; tree${crumb}</h1>
+  const body = `    <h1 class="${c.repoTitle}">${esc(opts.owner)}/${esc(opts.name)} &middot; tree${crumb}</h1>
 ${repoNav(opts.owner, opts.name, "tree", q)}
     ${revPicker(opts.refs, opts.rev)}
     <table class="${c.treeList}">
@@ -805,7 +805,7 @@ export function blobPage(opts: {
     : `${cut}<pre class="${c.code}"><code>${esc(opts.text)}</code></pre>`;
   const q = revQuery(opts.rev, opts.refs.head);
   const upPath = opts.path.split("/").slice(0, -1).join("/");
-  const body = `    <h1 class="${c.pageTitle}">${esc(opts.owner)}/${esc(opts.name)} &middot; ${esc(opts.path)}</h1>
+  const body = `    <h1 class="${c.repoTitle}">${esc(opts.owner)}/${esc(opts.name)} &middot; ${esc(opts.path)}</h1>
 ${repoNav(opts.owner, opts.name, "tree", q)}
     <p class="${c.repoDesc}"><a class="${c.withIcon}" href="${base(opts.owner, opts.name)}/tree/${esc(upPath)}${q}">${icon("arrow-left")}back to ${esc(upPath || "tree")}</a></p>
     ${content}`;
