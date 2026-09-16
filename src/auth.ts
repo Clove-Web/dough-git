@@ -7,6 +7,13 @@ import * as oidc from "openid-client";
 import { config, oidcEnabled } from "./config.ts";
 import { verifyDbToken } from "./tokens.ts";
 import { rememberUser, findUserBySub } from "./users.ts";
+import {
+  createSession,
+  deleteSessionRow,
+  findSession,
+  revalidate,
+  type RefreshOutcome,
+} from "./sessions.ts";
 import { ownerSlug } from "./git.ts";
 
 function b64url(input: Buffer | string): string {
@@ -61,33 +68,10 @@ export function sessionSlug(user: SessionUser): string {
   return user.slug || ownerSlug(user.username ?? user.name ?? "user");
 }
 
-const SESSION_TTL = 60 * 60 * 24 * 30;
 const OAUTH_TTL = 60 * 10;
 
 export const SESSION_COOKIE = "mg_session";
 export const OAUTH_COOKIE = "mg_oauth";
-
-export function makeSessionCookie(user: SessionUser): string {
-  return signValue(user, SESSION_TTL);
-}
-
-export function readSession(token: string | undefined): SessionUser | null {
-  return verifyValue<SessionUser & { exp: number }>(token);
-}
-
-export function currentUser(session: SessionUser): SessionUser | null {
-  const row = findUserBySub(session.sub);
-  if (!row) return null;
-
-  return {
-    sub: row.sub,
-    email: session.email,
-    name: row.name,
-    username: row.username,
-    slug: row.slug,
-    picture: row.picture,
-  };
-}
 
 export function parseBasicAuth(
   header: string | undefined,
@@ -142,33 +126,24 @@ export function gitActor(auth: GitAuth): string | null {
   return auth.kind === "user" ? auth.owner : null;
 }
 
-let discovered: oidc.Configuration | null = null;
+// --- OIDC (Doughmination SSO) ---------------------------------------------------
 
-async function oidcConfig(): Promise<oidc.Configuration> {
+let discovered: Promise<oidc.Configuration> | null = null;
+
+function oidcConfig(): Promise<oidc.Configuration> {
   if (!discovered) {
-    const { issuer, clientId, clientSecret, tokenAuth } = config.oidc;
-
-    let clientAuth: oidc.ClientAuth | undefined;
-    switch (tokenAuth) {
-      case "post":
-        clientAuth = oidc.ClientSecretPost(clientSecret);
-        break;
-      case "basic":
-        clientAuth = oidc.ClientSecretBasic(clientSecret);
-        break;
-      case "none":
-        clientAuth = oidc.None();
-        break;
-      default:
-        clientAuth = undefined;
-    }
-
-    discovered = await oidc.discovery(
-      new URL(issuer),
-      clientId,
-      clientAuth ? undefined : clientSecret,
-      clientAuth,
-    );
+    const { issuer, clientId, clientSecret } = config.oidc;
+    const insecure = issuer.startsWith("http://");
+    discovered = oidc
+      .discovery(new URL(issuer), clientId, clientSecret, undefined, {
+        // Plain http is only ever a local auth-server during development.
+        execute: insecure ? [oidc.allowInsecureRequests] : [],
+      })
+      .catch((err) => {
+        // Don't cache a failed discovery; try again on the next request.
+        discovered = null;
+        throw err;
+      });
   }
   return discovered;
 }
@@ -176,6 +151,10 @@ async function oidcConfig(): Promise<oidc.Configuration> {
 export async function oidcIssuer(): Promise<string> {
   const cfg = await oidcConfig();
   return cfg.serverMetadata().issuer;
+}
+
+export function accountUrl(): string | null {
+  return config.oidc.issuer ? `${config.oidc.issuer}/account` : null;
 }
 
 export interface AuthStart {
@@ -188,32 +167,55 @@ export async function startLogin(): Promise<AuthStart> {
   const verifier = oidc.randomPKCECodeVerifier();
   const challenge = await oidc.calculatePKCECodeChallenge(verifier);
   const state = oidc.randomState();
+  const nonce = oidc.randomNonce();
 
   const url = oidc.buildAuthorizationUrl(cfg, {
     redirect_uri: `${config.baseUrl}/auth/callback`,
-    scope: "openid profile email",
+    // offline_access gets a refresh token, which is how a session keeps
+    // checking that the SSO still vouches for the account.
+    scope: "openid profile email offline_access",
     code_challenge: challenge,
     code_challenge_method: "S256",
     state,
+    nonce,
   });
 
   return {
     redirectUrl: url.href,
-    txCookie: signValue({ verifier, state }, OAUTH_TTL),
+    txCookie: signValue({ verifier, state, nonce }, OAUTH_TTL),
   };
 }
 
+type Claims = Record<string, unknown>;
+
+function str(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function rememberFromClaims(claims: Claims) {
+  return rememberUser({
+    sub: String(claims.sub),
+    username: str(claims.preferred_username),
+    name: str(claims.name),
+    picture: str(claims.picture),
+    issuer: config.oidc.issuer,
+    adoptLegacy: config.oidc.adoptLegacyUsers,
+  });
+}
+
+/** Completes the code flow. Returns the new session cookie value, or null. */
 export async function finishLogin(
   currentUrl: string,
   txToken: string | undefined,
-): Promise<SessionUser | null> {
-  const tx = verifyValue<{ verifier: string; state: string }>(txToken);
+): Promise<string | null> {
+  const tx = verifyValue<{ verifier: string; state: string; nonce: string }>(txToken);
   if (!tx) return null;
 
   const cfg = await oidcConfig();
   const tokens = await oidc.authorizationCodeGrant(cfg, new URL(currentUrl), {
     pkceCodeVerifier: tx.verifier,
     expectedState: tx.state,
+    expectedNonce: tx.nonce,
   });
 
   const claims = tokens.claims();
@@ -222,19 +224,93 @@ export async function finishLogin(
     return null;
   }
 
-  const claimed = {
+  rememberFromClaims(claims);
+  return createSession({
     sub: String(claims.sub),
-    email: typeof claims.email === "string" ? claims.email : null,
-    name: typeof claims.name === "string" ? claims.name : null,
-    username:
-      typeof claims.preferred_username === "string"
-        ? claims.preferred_username
-        : null,
-    picture: typeof claims.picture === "string" ? claims.picture : null,
-  };
+    email: str(claims.email),
+    refreshToken: tokens.refresh_token ?? null,
+    idToken: tokens.id_token ?? null,
+  });
+}
 
-  const row = rememberUser(claimed);
-  return { ...claimed, slug: row.slug };
+async function refreshWithSso(refreshToken: string): Promise<RefreshOutcome> {
+  try {
+    const cfg = await oidcConfig();
+    const tokens = await oidc.refreshTokenGrant(cfg, refreshToken);
+    const claims = tokens.claims();
+    // Names, avatars and usernames edited in the SSO show up here without a
+    // fresh sign-in. The namespace (slug) never changes.
+    if (claims?.sub) rememberFromClaims(claims);
+    return {
+      kind: "ok",
+      sub: claims?.sub ? String(claims.sub) : null,
+      email: claims ? str(claims.email) : null,
+      refreshToken: tokens.refresh_token ?? null,
+      idToken: tokens.id_token ?? null,
+    };
+  } catch (err) {
+    if (err instanceof oidc.ResponseBodyError && err.error === "invalid_grant") {
+      return { kind: "revoked" };
+    }
+    console.warn("[auth] could not reach the SSO to re-check a session:", err instanceof Error ? err.message : err);
+    return { kind: "unavailable" };
+  }
+}
+
+/** Resolves the session cookie to a user, re-checking with the SSO when due. */
+export async function sessionUser(token: string | undefined): Promise<SessionUser | null> {
+  const found = findSession(token);
+  if (!found) return null;
+
+  const session = await revalidate(found, refreshWithSso);
+  if (!session) return null;
+
+  const row = findUserBySub(session.sub);
+  if (!row) {
+    deleteSessionRow(session.id_hash);
+    return null;
+  }
+
+  return {
+    sub: row.sub,
+    email: session.email,
+    name: row.name,
+    username: row.username,
+    slug: row.slug,
+    picture: row.picture,
+  };
+}
+
+/**
+ * Ends the session here, revokes its refresh token, and returns where to send
+ * the browser: the SSO's logout (so the SSO session ends too), or home.
+ */
+export async function logout(token: string | undefined): Promise<string> {
+  const session = findSession(token);
+  const home = `${config.baseUrl}/`;
+  if (!session) return home;
+  deleteSessionRow(session.id_hash);
+
+  if (!oidcEnabled) return home;
+  try {
+    const cfg = await oidcConfig();
+    if (session.refresh_token) {
+      await oidc.tokenRevocation(cfg, session.refresh_token).catch((err) => {
+        console.warn("[auth] refresh token revocation failed:", err instanceof Error ? err.message : err);
+      });
+    }
+    if (!cfg.serverMetadata().end_session_endpoint) return home;
+    const params: Record<string, string> = {
+      post_logout_redirect_uri: home,
+      client_id: config.oidc.clientId,
+    };
+    // With the id_token as proof, the SSO signs out without asking again.
+    if (session.id_token) params.id_token_hint = session.id_token;
+    return oidc.buildEndSessionUrl(cfg, params).href;
+  } catch (err) {
+    console.warn("[auth] SSO logout unavailable:", err instanceof Error ? err.message : err);
+    return home;
+  }
 }
 
 export { oidcEnabled };

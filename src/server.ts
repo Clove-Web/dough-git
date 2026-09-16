@@ -12,16 +12,16 @@ import { config, oidcEnabled } from "./config.ts";
 import {
   SESSION_COOKIE,
   OAUTH_COOKIE,
-  readSession,
-  currentUser,
-  makeSessionCookie,
+  sessionUser,
   startLogin,
   finishLogin,
+  logout,
   oidcIssuer,
   authenticateGit,
   gitActor,
   type SessionUser,
 } from "./auth.ts";
+import { SESSION_TTL, purgeExpiredSessions } from "./sessions.ts";
 import { listTokens, createToken, revokeToken } from "./tokens.ts";
 import { findUserBySlug } from "./users.ts";
 import {
@@ -107,10 +107,22 @@ const SITE_ORIGIN = new URL(config.baseUrl).origin;
 const GIT_RPC = /\/(?:git-upload-pack|git-receive-pack)$/;
 
 app.use("*", async (c, next) => {
-  const session = readSession(getCookie(c, SESSION_COOKIE));
-  c.set("user", session && "sub" in session ? currentUser(session) : null);
+  // Static files and git transport never look at the browser session, and
+  // skipping them keeps SSO re-checks off those hot paths.
+  if (c.req.path.startsWith("/static/") || GIT_RPC.test(c.req.path) || c.req.path.endsWith("/info/refs")) {
+    c.set("user", null);
+    return next();
+  }
+  const token = getCookie(c, SESSION_COOKIE);
+  const user = await sessionUser(token);
+  if (token && !user) deleteCookie(c, SESSION_COOKIE, { path: "/" });
+  c.set("user", user);
   await next();
 });
+
+// Logging out POSTs to /auth/logout, which redirects on to the SSO's logout,
+// and browsers check form-action against that redirect too.
+const SSO_ORIGIN = config.oidc.issuer ? new URL(config.oidc.issuer).origin : "";
 
 const CSP = [
   "default-src 'self'",
@@ -119,7 +131,7 @@ const CSP = [
   "img-src 'self' data: https:",
   `font-src 'self' ${FONT_ORIGIN}`,
   "connect-src 'self'",
-  "form-action 'self'",
+  `form-action 'self'${SSO_ORIGIN ? ` ${SSO_ORIGIN}` : ""}`,
   "frame-ancestors 'none'",
   "base-uri 'none'",
   "object-src 'none'",
@@ -203,7 +215,7 @@ app.get("/auth/login", async (c) => {
     return c.html(
       view.messagePage({
         title: "login unavailable",
-        message: "PocketID (OIDC) is not configured on this instance.",
+        message: "Single sign-on (OIDC) is not configured on this instance.",
         user: null,
       }),
       501,
@@ -240,9 +252,9 @@ app.get("/auth/callback", async (c) => {
 
   const currentUrl = `${config.baseUrl}/auth/callback${new URL(c.req.url).search}`;
 
-  let user = null;
+  let session: string | null = null;
   try {
-    user = await finishLogin(currentUrl, tx);
+    session = await finishLogin(currentUrl, tx);
   } catch (err) {
     const e = err as {
       error?: string;
@@ -256,30 +268,38 @@ app.get("/auth/callback", async (c) => {
       err instanceof Error ? e.message : err,
     );
   }
-  if (!user) {
+  if (!session) {
     return c.html(
       view.messagePage({
         title: "login failed",
-        message: "Could not complete sign-in, or your account is not allowed.",
+        message:
+          idpError === "access_denied"
+            ? "Your SSO account isn't allowed to use this instance. Ask an SSO admin to add you to its allowed groups."
+            : "Could not complete sign-in. Please try again.",
         user: null,
       }),
       403,
     );
   }
-  setCookie(c, SESSION_COOKIE, makeSessionCookie(user), {
+  setCookie(c, SESSION_COOKIE, session, {
     httpOnly: true,
     secure: config.baseUrl.startsWith("https"),
     sameSite: "Lax",
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: SESSION_TTL,
   });
   return c.redirect("/");
 });
 
-app.get("/auth/logout", (c) => {
+// POST so a stray link or image can't sign anyone out; the same-origin check
+// above covers the form.
+app.post("/auth/logout", async (c) => {
+  const target = await logout(getCookie(c, SESSION_COOKIE));
   deleteCookie(c, SESSION_COOKIE, { path: "/" });
-  return c.redirect("/");
+  return c.redirect(target);
 });
+
+app.get("/auth/logout", (c) => c.redirect("/"));
 
 app.get("/settings", (c) => {
   const user = c.get("user");
@@ -799,7 +819,7 @@ app.post("/:owner/:name/collaborators", async (c) => {
         title: "no such user",
         message:
           `Nobody on this instance goes by "${slug}". They have to sign in ` +
-          `with PocketID once before they can be added.`,
+          `to this instance once before they can be added.`,
         user: c.get("user"),
       }),
       400,
@@ -1003,6 +1023,15 @@ app.post("/:owner/:name/mirrors/check", async (c) => {
 
 const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
+function sweepSessions(): void {
+  try {
+    const purged = purgeExpiredSessions();
+    if (purged) console.log(`[auth] purged ${purged} expired sessions`);
+  } catch (err) {
+    console.warn("[auth] session sweep failed:", err);
+  }
+}
+
 async function sweepTrash(): Promise<void> {
   try {
     const purged = await purgeAllExpired();
@@ -1030,7 +1059,7 @@ serve(
     console.log(
       `  trash:      ${config.trashDays > 0 ? `${config.trashDays}d, swept every 6h` : "kept forever"}`,
     );
-    console.log(`  logins:     any PocketID account`);
+    console.log(`  logins:     accounts on ${config.oidc.issuer || "(no issuer)"} (limit with the client's allowed groups)`);
     if (oidcEnabled) {
       try {
         const iss = await oidcIssuer();
@@ -1045,6 +1074,10 @@ serve(
     }
 
     void sweepTrash();
-    setInterval(() => void sweepTrash(), SWEEP_INTERVAL_MS).unref();
+    sweepSessions();
+    setInterval(() => {
+      void sweepTrash();
+      sweepSessions();
+    }, SWEEP_INTERVAL_MS).unref();
   },
 );

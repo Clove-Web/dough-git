@@ -38,10 +38,10 @@ export const config = {
   trashDays: Math.max(0, Number(optional("MINIGIT_TRASH_DAYS", "30")) || 0),
 
   oidc: {
-    issuer: optional("OIDC_ISSUER", ""),
+    issuer: optional("OIDC_ISSUER", "").replace(/\/+$/, ""),
     clientId: optional("OIDC_CLIENT_ID", ""),
     clientSecret: optional("OIDC_CLIENT_SECRET", ""),
-    tokenAuth: optional("OIDC_TOKEN_AUTH", ""),
+    adoptLegacyUsers: optional("OIDC_ADOPT_LEGACY_USERS", "true") !== "false",
   },
 
   sessionSecret: optional("SESSION_SECRET", "dev-insecure-secret-change-me"),

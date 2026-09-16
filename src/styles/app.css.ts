@@ -69,6 +69,26 @@ export const classes = {
     color: vars.accent,
   }),
 
+  navForm: style({
+    display: "inline",
+    margin: 0,
+  }),
+
+  // A form button that looks exactly like the nav links beside it.
+  navButton: style({
+    padding: 0,
+    border: 0,
+    background: "none",
+    font: "inherit",
+    selectors: {
+      "&:hover, &:active": {
+        color: vars.accent,
+        background: "none",
+        textDecoration: "underline",
+      },
+    },
+  }),
+
   user: style({
     display: "flex",
     alignItems: "center",

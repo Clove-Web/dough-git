@@ -6,7 +6,7 @@ import { config } from "./config.ts";
 import { classes as c } from "./styles/index.ts";
 import { icon } from "./icons.ts";
 import { escapeHtml, renderMarkdown, plainSummary } from "./markdown.ts";
-import { sessionSlug } from "./auth.ts";
+import { accountUrl, sessionSlug } from "./auth.ts";
 import { maskWebhook, mirrorHost, mirrorSlug, MIRROR_KINDS, type MirrorKind } from "./urls.ts";
 import type { SessionUser } from "./auth.ts";
 import type { CollaboratorRow } from "./access.ts";
@@ -113,7 +113,9 @@ function layout(opts: {
     : "";
   const settings = opts.user
     ? `<a class="${c.navLink}" href="/settings">${icon("gear")}settings</a>
-       <a class="${c.navLink}" href="/auth/logout">${icon("logout")}logout</a>`
+       <form method="post" action="/auth/logout" class="${c.navForm}">
+         <button type="submit" class="${c.navLink} ${c.navButton}">${icon("logout")}logout</button>
+       </form>`
     : `<a class="${c.navLink}" href="/auth/login">${icon("login")}login</a>`;
 
   const description = metaText(opts.description || config.description);
@@ -977,8 +979,10 @@ ${clear}
     </form>
 
     <h2 class="${c.sectionTitle}">${icon("user")}account</h2>
-    <p class="${c.repoDesc}">Your name and avatar come from PocketID and refresh on each sign-in,
-    so there is nothing to edit here. Your owner namespace is
+    <p class="${c.repoDesc}">Your name and avatar come from your SSO account and refresh
+    automatically, so there is nothing to edit here${
+      accountUrl() ? ` — change them on <a href="${esc(accountUrl()!)}">your SSO account page</a>` : ""
+    }. Your owner namespace is
     <code>${esc(opts.user ? ownerOf(opts.user) : "")}</code> and never changes.</p>`;
 
   return layout({

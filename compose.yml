@@ -4,7 +4,7 @@ services:
     container_name: dough-git
     restart: unless-stopped
 
-    # Secrets + PocketID config live in .env (see .env.example).
+    # Secrets + SSO config live in .env (see .env.example).
     env_file:
       - .env
 
