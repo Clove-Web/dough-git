@@ -258,6 +258,7 @@ export async function checkMirror(
   try {
     const remoteResult = await lsRemote(link.url);
     if (!remoteResult.ok) {
+      logIssue(ref, link, remoteResult.kind, remoteResult.message);
       if (remoteResult.kind === "denied" || remoteResult.kind === "missing") {
         recordSuccess(ref, link.kind, {
           state: remoteResult.kind,
@@ -282,24 +283,79 @@ export async function checkMirror(
     const localHead = head ? (local.get(head) ?? null) : null;
     const remoteHead = head ? (remote.get(head) ?? null) : null;
     const headVerdict = await ancestryVerdict(ref, localHead, remoteHead);
+    const state = rollUp(cmp, headVerdict);
+
+    for (const reason of mismatchReasons(cmp, local, remote)) {
+      logIssue(ref, link, state, reason);
+    }
 
     recordSuccess(ref, link.kind, {
-      state: rollUp(cmp, headVerdict),
+      state,
       localSha: localHead,
       remoteSha: remoteHead,
-      detail: `${cmp.matched}/${cmp.total} refs`,
+      detail: describeMismatch(cmp),
     });
     return true;
   } catch (err) {
-    recordFailure(
-      ref,
-      link.kind,
-      err instanceof Error ? err.message : "check failed",
-    );
+    const message = err instanceof Error ? err.message : "check failed";
+    logIssue(ref, link, "error", message);
+    recordFailure(ref, link.kind, message);
     return true;
   } finally {
     inFlight.delete(k);
   }
+}
+
+const ISSUE_LABELS: Record<string, string> = {
+  ahead: "mirror behind",
+  behind: "local behind",
+  diverged: "diverged",
+  out_of_sync: "out of sync",
+  denied: "private or missing",
+  missing: "repository missing",
+  error: "check failed",
+};
+
+function logIssue(
+  ref: RepoRef,
+  link: MirrorLink,
+  state: string,
+  reason: string,
+): void {
+  const label = ISSUE_LABELS[state] ?? state;
+  console.warn(`[mirror] ${refSlug(ref)} -> ${link.kind} ${label}: ${reason} (${link.url})`);
+}
+
+export function mismatchReasons(
+  cmp: Comparison,
+  local: Map<string, string>,
+  remote: Map<string, string>,
+): string[] {
+  const sha = (s: string | undefined) => (s ?? "?").slice(0, 7);
+  return [
+    ...cmp.differing.map(
+      (n) => `${shortRef(n)} differs (local ${sha(local.get(n))}, mirror ${sha(remote.get(n))})`,
+    ),
+    ...cmp.missingRemote.map((n) => `${shortRef(n)} not on mirror (local ${sha(local.get(n))})`),
+    ...cmp.missingLocal.map((n) => `${shortRef(n)} only on mirror (${sha(remote.get(n))})`),
+  ];
+}
+
+function shortRef(name: string): string {
+  return name.replace(/^refs\/heads\//, "").replace(/^refs\/tags\//, "tag ");
+}
+
+export function describeMismatch(cmp: Comparison): string {
+  const base = `${cmp.matched}/${cmp.total} refs`;
+  const parts = [
+    ...cmp.differing.map((n) => `${shortRef(n)} differs`),
+    ...cmp.missingRemote.map((n) => `${shortRef(n)} not on mirror`),
+    ...cmp.missingLocal.map((n) => `${shortRef(n)} only on mirror`),
+  ];
+  if (parts.length === 0) return base;
+  const shown = parts.slice(0, 2).join(", ");
+  const more = parts.length > 2 ? ` +${parts.length - 2} more` : "";
+  return `${base} (${shown}${more})`;
 }
 
 async function defaultBranchRef(

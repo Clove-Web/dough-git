@@ -23,6 +23,8 @@ const {
   dropMirrorStatus,
   markStale,
   needsCheck,
+  describeMismatch,
+  mismatchReasons,
 } = await import("../src/mirror.ts");
 const { classifyRemoteError, lsRemote, createRepo, refDir, localMirrorRefs } =
   await import("../src/git.ts");
@@ -114,6 +116,23 @@ cmp = compareRefs(
 );
 check("differences both ways -> out_of_sync", rollUp(cmp, "synced") === "out_of_sync");
 check("empty on both sides -> synced", rollUp(compareRefs(m({}), m({})), null) === "synced");
+
+console.log("\n-- describing mismatches --");
+const both = [
+  m({ "refs/heads/main": A, "refs/heads/dev": A, "refs/tags/v1": A }),
+  m({ "refs/heads/main": A, "refs/heads/dev": B, "refs/heads/old": B }),
+];
+cmp = compareRefs(...both);
+const reasons = mismatchReasons(cmp, ...both);
+check("names a differing branch with both shas", reasons.includes("dev differs (local 1111111, mirror 2222222)"));
+check("names a ref missing on the mirror", reasons.includes("tag v1 not on mirror (local 1111111)"));
+check("names a ref only on the mirror", reasons.includes("old only on mirror (2222222)"));
+check("one reason per mismatched ref", reasons.length === 3);
+check("detail names the first two", describeMismatch(cmp) === "1/4 refs (dev differs, tag v1 not on mirror +1 more)");
+check(
+  "detail stays bare when synced",
+  describeMismatch(compareRefs(m({ "refs/heads/main": A }), m({ "refs/heads/main": A }))) === "1/1 refs",
+);
 
 console.log("\n-- ancestry, against a real repository --");
 const ref = { owner: "alice", name: "anc" };
