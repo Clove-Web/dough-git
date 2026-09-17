@@ -56,6 +56,12 @@ jobs:
 
           git remote add mirror "$targetUrl"
 
+          # GitHub's synthetic refs/pull/* refs live in a hidden namespace on
+          # Codeberg/Gitea and are always rejected, so drop them before mirroring.
+          for ref in $(git for-each-ref --format='%(refname)' 'refs/pull/*'); do
+            git update-ref -d "$ref"
+          done
+
           # Credentials go through a helper so the token never lands in .git/config
           git -c credential.helper= \
               -c "credential.helper=!f() { echo username=\"\$CODEBERG_USERNAME\"; echo password=\"\$CODEBERG_TOKEN\"; }; f" \
