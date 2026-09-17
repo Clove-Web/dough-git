@@ -35,16 +35,6 @@ jobs:
             "https://x-access-token:${SOURCE_TOKEN}@${sourceHost}/${GITHUB_REPOSITORY}.git" \
             source.git
 
-      - name: Drop pull-request refs
-        working-directory: source.git
-        run: |
-          set -euo pipefail
-
-          git for-each-ref --format='%(refname)' 'refs/pull/*' \
-            | while read -r ref; do
-                git update-ref -d "$ref"
-              done
-
       - name: Push mirror
         working-directory: source.git
         run: |
