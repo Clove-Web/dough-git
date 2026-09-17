@@ -58,7 +58,7 @@ jobs:
 
           # GitHub's synthetic refs/pull/* refs live in a hidden namespace on
           # Codeberg/Gitea and are always rejected, so drop them before mirroring.
-          for ref in $(git for-each-ref --format='%(refname)' 'refs/pull/*'); do
+          for ref in $(git for-each-ref --format='%(refname)' 'refs/pull/*/head' 'refs/pull/*/merge'); do
             git update-ref -d "$ref"
           done
 
