@@ -97,7 +97,6 @@ import {
   type GitService,
 } from "./smart-http.ts";
 import * as view from "./views.ts";
-import { FONT_ORIGIN } from "./styles/index.ts";
 
 type Env = { Variables: { user: SessionUser | null } };
 const app = new Hono<Env>({ strict: false });
@@ -129,7 +128,7 @@ const CSP = [
   "script-src 'self'",
   "style-src 'self'",
   "img-src 'self' data: https:",
-  `font-src 'self' ${FONT_ORIGIN}`,
+  "font-src 'self'",
   "connect-src 'self'",
   `form-action 'self'${SSO_ORIGIN ? ` ${SSO_ORIGIN}` : ""}`,
   "frame-ancestors 'none'",

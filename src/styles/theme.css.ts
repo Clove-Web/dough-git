@@ -35,29 +35,29 @@ export const vars = createGlobalThemeContract({
 });
 
 createGlobalTheme(":root", vars, {
-  accent: "#5cd1e6",
-  accentAlt: "#34a9c6",
+  accent: "#c22a44",
+  accentAlt: "#9c1f34",
   gilt: "#d8b775",
-  danger: "#ec6a80",
-  success: "#4fc9a4",
+  danger: "#ff4d5e",
+  success: "#5f9e78",
 
-  bgDeep: "#02060c",
-  bgRaised: "#0b1726",
-  bg: "#060d18",
-  surface: "#112035",
-  surfaceHi: "#1c2f48",
-  border: "#294464",
+  bgDeep: "#030207",
+  bgRaised: "#100a10",
+  bg: "#07050a",
+  surface: "#1a1016",
+  surfaceHi: "#241318",
+  border: "#34141c",
 
-  textFaint: "#64809c",
-  textDim: "#7a95b0",
-  textMuted: "#93aec7",
-  textSoft: "#c2d6e6",
-  text: "#eaf4fb",
+  textFaint: "#6b4a53",
+  textDim: "#82616a",
+  textMuted: "#9c848c",
+  textSoft: "#c7b6ba",
+  text: "#ece3e6",
 
-  font: "'Comic Code', system-ui, -apple-system, sans-serif",
-  display: "'Ink Free', 'Comic Code', system-ui, -apple-system, sans-serif",
-  mono: "'Maple Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
-  radius: "0",
+  font: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+  display: "Georgia, 'Iowan Old Style', 'Palatino Linotype', serif",
+  mono: "ui-monospace, 'Cascadia Code', Menlo, monospace",
+  radius: "8px",
 });
 
 globalStyle(":root", { colorScheme: "dark" });
