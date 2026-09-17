@@ -5,6 +5,10 @@
 import { globalStyle } from "@vanilla-extract/css";
 import { vars } from "./theme.css";
 
+const CURSORS = "https://m.doughmination.gay/cursors/sandrone";
+const cursor = (file: string, hotspot: string, fallback: string) =>
+  `url('${CURSORS}/${file}.png') ${hotspot}, ${fallback}`;
+
 globalStyle("*", { boxSizing: "border-box" });
 
 globalStyle("html", {
@@ -19,7 +23,7 @@ globalStyle("body", {
   fontSize: "15px",
   lineHeight: 1.5,
   color: vars.text,
-  cursor: "url('/static/cursors/default-dark.png') 4 1, default",
+  cursor: cursor("Normal", "0 0", "default"),
 });
 
 globalStyle("a", {
@@ -30,7 +34,7 @@ globalStyle("a", {
 globalStyle("a:hover", { textDecoration: "underline" });
 
 globalStyle("a, button", {
-  cursor: "url('/static/cursors/pointer-dark.png') 12 1, pointer",
+  cursor: cursor("Link", "4 0", "pointer"),
 });
 
 globalStyle("h1, h2, h3", {
@@ -107,6 +111,7 @@ globalStyle(sel(FIELDS), {
   background: vars.bgDeep,
   color: vars.text,
   minWidth: 0,
+  cursor: cursor("Text", "4 9", "text"),
 });
 
 globalStyle(sel(FIELDS, "::placeholder"), { color: vars.textFaint });
@@ -121,7 +126,7 @@ globalStyle(sel(CONTROLS, ":focus-visible"), {
 
 globalStyle(sel(CONTROLS, ":disabled"), {
   opacity: 0.5,
-  cursor: "not-allowed",
+  cursor: cursor("Unavailable", "0 0", "not-allowed"),
 });
 
 globalStyle('input[type="checkbox"]', {
@@ -131,5 +136,5 @@ globalStyle('input[type="checkbox"]', {
 });
 
 globalStyle('label:has(input[type="checkbox"])', {
-  cursor: "url('/static/cursors/pointer-dark.png') 12 1, pointer",
+  cursor: cursor("Link", "4 0", "pointer"),
 });
